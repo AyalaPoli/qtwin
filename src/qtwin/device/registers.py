@@ -67,6 +67,8 @@ CTRL_RESET: int = 1 << 1  # self-clearing: writing 1 resets the device, the bit 
 STATUS_UNDERRUN: int = 1 << 0
 STATUS_OVERFLOW: int = 1 << 1
 STATUS_LATE: int = 1 << 2
+STATUS_MASK: int = STATUS_UNDERRUN | STATUS_OVERFLOW | STATUS_LATE
+"""Every bit STATUS can hold. IRQ-only events (FIFO_LOW, SNSPD) never appear in STATUS."""
 
 # IRQ_STATUS uses the same positions for the three error events, plus interrupt-only events.
 IRQ_UNDERRUN: int = STATUS_UNDERRUN

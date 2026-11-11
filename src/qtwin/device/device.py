@@ -31,10 +31,12 @@ from qtwin.device.registers import (
     CTRL_RESET,
     CTRL_RUN,
     FIFO_CAPACITY,
+    IRQ_FIFO_LOW,
     OUTPUT_TARGETS,
     REG_MASK,
     REGISTERS,
     STATUS_LATE,
+    STATUS_MASK,
     STATUS_OVERFLOW,
     STATUS_UNDERRUN,
     Access,
@@ -55,6 +57,7 @@ _CYCLE_LO = addr("CLOCK.CYCLE_LO")
 _CYCLE_HI = addr("CLOCK.CYCLE_HI")
 _FIFO_LEVEL = addr("FIFO.LEVEL")
 _FIFO_DROPPED = addr("FIFO.DROPPED")
+_FIFO_WATERMARK = addr("FIFO.LOW_WATERMARK")
 # Lanes that have a SKEW_TRIM register (AOM and GPIO; SNSPD has none).
 _SKEW_TRIM = {
     lane: BY_NAME[f"{lane}.SKEW_TRIM"].address for lane in LANES if f"{lane}.SKEW_TRIM" in BY_NAME
@@ -109,6 +112,7 @@ class Device:
         # the Scope they survive reset, so a run's whole history stays in one place.
         self._fifo_levels: list[tuple[int, int]] = []
         self._status_events: list[tuple[int, int]] = []
+        self._irq_events: list[tuple[int, int]] = []
         self.reset()
 
     def reset(self) -> None:
@@ -144,8 +148,13 @@ class Device:
 
     @property
     def status_events(self) -> tuple[tuple[int, int], ...]:
-        """(cycle, mask) for every set_status call, in order: when each error flag was raised."""
+        """(cycle, STATUS bits) for every set_status call that raised an error flag, in order."""
         return tuple(self._status_events)
+
+    @property
+    def irq_events(self) -> tuple[tuple[int, int], ...]:
+        """(cycle, mask) for every set_status call, in order: each IRQ_STATUS raise (M7)."""
+        return tuple(self._irq_events)
 
     @property
     def fifo_level(self) -> int:
@@ -230,13 +239,17 @@ class Device:
     # --- Device side ---
 
     def set_status(self, mask: int) -> None:
-        """Hardware raises the event bits in `mask` in both STATUS and IRQ_STATUS.
+        """Hardware raises the event bits in `mask`: all of them in IRQ_STATUS, the error flags
+        (STATUS_MASK) also in STATUS. IRQ-only events (FIFO_LOW, SNSPD clicks) are not errors.
 
         The bits are sticky: they stay set until the host clears them with a W1C write.
         """
-        self._values[_STATUS] |= mask
+        errors = mask & STATUS_MASK
+        self._values[_STATUS] |= errors
         self._values[_IRQ_STATUS] |= mask
-        self._status_events.append((self.clock.now, mask))
+        if errors:
+            self._status_events.append((self.clock.now, errors))
+        self._irq_events.append((self.clock.now, mask))
 
     def push_command(self, cmd: Command) -> None:
         """Queue a command, skipping CMD_PUSH framing (tests); a completed bus frame ends here too.
@@ -286,7 +299,35 @@ class Device:
             self.write(address, value)
         self._advance(cycle)
 
+    def run_until_irq(self, limit: int) -> int | None:
+        """Advance time until the IRQ line rises, but not past absolute cycle `limit` (cycles).
+
+        Returns the cycle the line went high (now, if it already is), or None with the clock at
+        `limit` if it never did. Everything due on the returned cycle has run; nothing later has.
+        The test bench hands this to the interrupt driver as `wait_for_irq`, the way it hands
+        run_until over as `wait_until`.
+        """
+        # Settle anything due on the current cycle first, so the check below sees it.
+        self.run_until(self.clock.now)
+        while not self.irq_line:
+            if self.clock.now >= limit:
+                return None
+            # Step one event at a time: the line can only change when something happens, so
+            # stopping at each event cycle finds the exact rising cycle without ticking.
+            self.run_until(self._next_event(limit))
+        return self.clock.now
+
     # --- Internals ---
+
+    def _next_event(self, limit: int) -> int:
+        # Earliest cycle after now (capped at limit) where the device state can change. After a
+        # run_until every pending arrival and every due head lies strictly in the future.
+        candidates = [limit]
+        if self._pending:
+            candidates.append(self._pending[0][0])
+        if self._values[_CTRL] & CTRL_RUN and len(self._fifo) > 0:
+            candidates.append(self._fifo.peek().timestamp_cycles)
+        return max(min(candidates), self.clock.now + 1)
 
     def _advance(self, cycle: int) -> None:
         # Time passes up to `cycle` (>= now, checked by run_until) with no bus write landing;
@@ -311,7 +352,13 @@ class Device:
         # Called by the sequencer with the clock already at the execution cycle. For a late
         # command that is after its timestamp, and the Scope keeps both so the miss is measurable.
         # The register changes now; the output path delay is added on top for the Scope edge.
-        self._fifo_levels.append((self.clock.now, len(self._fifo)))  # the sequencer just popped
+        level = len(self._fifo)
+        self._fifo_levels.append((self.clock.now, level))  # the sequencer just popped
+        if level == self._values[_FIFO_WATERMARK] - 1:
+            # Pops lower the level one at a time, so this is the pop that crossed below the
+            # watermark. An edge, not a level: staying low does not re-raise, so the ISR is
+            # called once per refill cycle instead of on every pop. [assumed]
+            self.set_status(IRQ_FIFO_LOW)
         self._values[cmd.target] = cmd.value
         channel = BY_ADDRESS[cmd.target].name
         self.scope.record(
