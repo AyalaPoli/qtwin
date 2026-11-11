@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+
+# IDEs
+.idea/
+# Machine-specific local PyCharm MCP endpoint (port changes per machine/session)
+.mcp.json
+
+# Build and generated output
+build/
+cmake-build-*/
+out/
