@@ -1,0 +1,386 @@
+[
+ {
+  "channel": "AOM0.PHASE",
+  "ideal_cycle": 1000,
+  "actual_cycle": 1000,
+  "value": 0
+ },
+ {
+  "channel": "AOM1.PHASE",
+  "ideal_cycle": 1100,
+  "actual_cycle": 1100,
+  "value": 1
+ },
+ {
+  "channel": "AOM2.PHASE",
+  "ideal_cycle": 1200,
+  "actual_cycle": 1200,
+  "value": 2
+ },
+ {
+  "channel": "AOM3.PHASE",
+  "ideal_cycle": 1300,
+  "actual_cycle": 1300,
+  "value": 3
+ },
+ {
+  "channel": "GPIO0.LEVEL",
+  "ideal_cycle": 1400,
+  "actual_cycle": 1400,
+  "value": 4
+ },
+ {
+  "channel": "GPIO1.LEVEL",
+  "ideal_cycle": 1500,
+  "actual_cycle": 1500,
+  "value": 5
+ },
+ {
+  "channel": "GPIO2.LEVEL",
+  "ideal_cycle": 1600,
+  "actual_cycle": 1600,
+  "value": 6
+ },
+ {
+  "channel": "GPIO3.LEVEL",
+  "ideal_cycle": 1700,
+  "actual_cycle": 1700,
+  "value": 7
+ },
+ {
+  "channel": "AOM0.PHASE",
+  "ideal_cycle": 1800,
+  "actual_cycle": 1800,
+  "value": 8
+ },
+ {
+  "channel": "AOM1.PHASE",
+  "ideal_cycle": 1900,
+  "actual_cycle": 1900,
+  "value": 9
+ },
+ {
+  "channel": "AOM2.PHASE",
+  "ideal_cycle": 2000,
+  "actual_cycle": 2000,
+  "value": 10
+ },
+ {
+  "channel": "AOM3.PHASE",
+  "ideal_cycle": 2100,
+  "actual_cycle": 2100,
+  "value": 11
+ },
+ {
+  "channel": "GPIO0.LEVEL",
+  "ideal_cycle": 2200,
+  "actual_cycle": 2200,
+  "value": 12
+ },
+ {
+  "channel": "GPIO1.LEVEL",
+  "ideal_cycle": 2300,
+  "actual_cycle": 2300,
+  "value": 13
+ },
+ {
+  "channel": "GPIO2.LEVEL",
+  "ideal_cycle": 2400,
+  "actual_cycle": 2400,
+  "value": 14
+ },
+ {
+  "channel": "GPIO3.LEVEL",
+  "ideal_cycle": 2500,
+  "actual_cycle": 2500,
+  "value": 15
+ },
+ {
+  "channel": "AOM0.PHASE",
+  "ideal_cycle": 2600,
+  "actual_cycle": 2600,
+  "value": 16
+ },
+ {
+  "channel": "AOM1.PHASE",
+  "ideal_cycle": 2700,
+  "actual_cycle": 2700,
+  "value": 17
+ },
+ {
+  "channel": "AOM2.PHASE",
+  "ideal_cycle": 2800,
+  "actual_cycle": 2800,
+  "value": 18
+ },
+ {
+  "channel": "AOM3.PHASE",
+  "ideal_cycle": 2900,
+  "actual_cycle": 2900,
+  "value": 19
+ },
+ {
+  "channel": "GPIO0.LEVEL",
+  "ideal_cycle": 3000,
+  "actual_cycle": 3000,
+  "value": 20
+ },
+ {
+  "channel": "GPIO1.LEVEL",
+  "ideal_cycle": 3100,
+  "actual_cycle": 3100,
+  "value": 21
+ },
+ {
+  "channel": "GPIO2.LEVEL",
+  "ideal_cycle": 3200,
+  "actual_cycle": 3200,
+  "value": 22
+ },
+ {
+  "channel": "GPIO3.LEVEL",
+  "ideal_cycle": 3300,
+  "actual_cycle": 3300,
+  "value": 23
+ },
+ {
+  "channel": "AOM0.PHASE",
+  "ideal_cycle": 3400,
+  "actual_cycle": 3400,
+  "value": 24
+ },
+ {
+  "channel": "AOM1.PHASE",
+  "ideal_cycle": 3500,
+  "actual_cycle": 3500,
+  "value": 25
+ },
+ {
+  "channel": "AOM2.PHASE",
+  "ideal_cycle": 3600,
+  "actual_cycle": 3600,
+  "value": 26
+ },
+ {
+  "channel": "AOM3.PHASE",
+  "ideal_cycle": 3700,
+  "actual_cycle": 3700,
+  "value": 27
+ },
+ {
+  "channel": "GPIO0.LEVEL",
+  "ideal_cycle": 3800,
+  "actual_cycle": 3800,
+  "value": 28
+ },
+ {
+  "channel": "GPIO1.LEVEL",
+  "ideal_cycle": 3900,
+  "actual_cycle": 3900,
+  "value": 29
+ },
+ {
+  "channel": "GPIO2.LEVEL",
+  "ideal_cycle": 4000,
+  "actual_cycle": 4000,
+  "value": 30
+ },
+ {
+  "channel": "GPIO3.LEVEL",
+  "ideal_cycle": 4100,
+  "actual_cycle": 4100,
+  "value": 31
+ },
+ {
+  "channel": "AOM0.PHASE",
+  "ideal_cycle": 4200,
+  "actual_cycle": 4200,
+  "value": 32
+ },
+ {
+  "channel": "AOM1.PHASE",
+  "ideal_cycle": 4300,
+  "actual_cycle": 4300,
+  "value": 33
+ },
+ {
+  "channel": "AOM2.PHASE",
+  "ideal_cycle": 4400,
+  "actual_cycle": 4400,
+  "value": 34
+ },
+ {
+  "channel": "AOM3.PHASE",
+  "ideal_cycle": 4500,
+  "actual_cycle": 4500,
+  "value": 35
+ },
+ {
+  "channel": "GPIO0.LEVEL",
+  "ideal_cycle": 4600,
+  "actual_cycle": 4600,
+  "value": 36
+ },
+ {
+  "channel": "GPIO1.LEVEL",
+  "ideal_cycle": 4700,
+  "actual_cycle": 4700,
+  "value": 37
+ },
+ {
+  "channel": "GPIO2.LEVEL",
+  "ideal_cycle": 4800,
+  "actual_cycle": 4800,
+  "value": 38
+ },
+ {
+  "channel": "GPIO3.LEVEL",
+  "ideal_cycle": 4900,
+  "actual_cycle": 4900,
+  "value": 39
+ },
+ {
+  "channel": "AOM0.PHASE",
+  "ideal_cycle": 5000,
+  "actual_cycle": 5000,
+  "value": 40
+ },
+ {
+  "channel": "AOM1.PHASE",
+  "ideal_cycle": 5100,
+  "actual_cycle": 5100,
+  "value": 41
+ },
+ {
+  "channel": "AOM2.PHASE",
+  "ideal_cycle": 5200,
+  "actual_cycle": 5200,
+  "value": 42
+ },
+ {
+  "channel": "AOM3.PHASE",
+  "ideal_cycle": 5300,
+  "actual_cycle": 5300,
+  "value": 43
+ },
+ {
+  "channel": "GPIO0.LEVEL",
+  "ideal_cycle": 5400,
+  "actual_cycle": 5400,
+  "value": 44
+ },
+ {
+  "channel": "GPIO1.LEVEL",
+  "ideal_cycle": 5500,
+  "actual_cycle": 5500,
+  "value": 45
+ },
+ {
+  "channel": "GPIO2.LEVEL",
+  "ideal_cycle": 5600,
+  "actual_cycle": 5600,
+  "value": 46
+ },
+ {
+  "channel": "GPIO3.LEVEL",
+  "ideal_cycle": 5700,
+  "actual_cycle": 5700,
+  "value": 47
+ },
+ {
+  "channel": "AOM0.PHASE",
+  "ideal_cycle": 5800,
+  "actual_cycle": 5800,
+  "value": 48
+ },
+ {
+  "channel": "AOM1.PHASE",
+  "ideal_cycle": 5900,
+  "actual_cycle": 5900,
+  "value": 49
+ },
+ {
+  "channel": "AOM2.PHASE",
+  "ideal_cycle": 6000,
+  "actual_cycle": 6000,
+  "value": 50
+ },
+ {
+  "channel": "AOM3.PHASE",
+  "ideal_cycle": 6100,
+  "actual_cycle": 6100,
+  "value": 51
+ },
+ {
+  "channel": "GPIO0.LEVEL",
+  "ideal_cycle": 6200,
+  "actual_cycle": 6200,
+  "value": 52
+ },
+ {
+  "channel": "GPIO1.LEVEL",
+  "ideal_cycle": 6300,
+  "actual_cycle": 6300,
+  "value": 53
+ },
+ {
+  "channel": "GPIO2.LEVEL",
+  "ideal_cycle": 6400,
+  "actual_cycle": 6400,
+  "value": 54
+ },
+ {
+  "channel": "GPIO3.LEVEL",
+  "ideal_cycle": 6500,
+  "actual_cycle": 6500,
+  "value": 55
+ },
+ {
+  "channel": "AOM0.PHASE",
+  "ideal_cycle": 6600,
+  "actual_cycle": 6600,
+  "value": 56
+ },
+ {
+  "channel": "AOM1.PHASE",
+  "ideal_cycle": 6700,
+  "actual_cycle": 6700,
+  "value": 57
+ },
+ {
+  "channel": "AOM2.PHASE",
+  "ideal_cycle": 6800,
+  "actual_cycle": 6800,
+  "value": 58
+ },
+ {
+  "channel": "AOM3.PHASE",
+  "ideal_cycle": 6900,
+  "actual_cycle": 6900,
+  "value": 59
+ },
+ {
+  "channel": "GPIO0.LEVEL",
+  "ideal_cycle": 7000,
+  "actual_cycle": 7000,
+  "value": 60
+ },
+ {
+  "channel": "GPIO1.LEVEL",
+  "ideal_cycle": 7100,
+  "actual_cycle": 7100,
+  "value": 61
+ },
+ {
+  "channel": "GPIO2.LEVEL",
+  "ideal_cycle": 7200,
+  "actual_cycle": 7200,
+  "value": 62
+ },
+ {
+  "channel": "GPIO3.LEVEL",
+  "ideal_cycle": 7300,
+  "actual_cycle": 7300,
+  "value": 63
+ }
+]

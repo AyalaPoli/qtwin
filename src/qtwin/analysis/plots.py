@@ -16,7 +16,7 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
 from qtwin.analysis.stats import linear_fit
-from qtwin.scenarios import SCENARIOS, calibrate_scenario, run_scenario
+from qtwin.scenarios import SCENARIOS, calibrate_scenario, run
 from qtwin.scope import LANES, Edge, channel_offsets, component, offset_vs_time
 
 # Colors from a validated colorblind-safe categorical palette (slots 1 and 2), plus neutrals.
@@ -178,11 +178,11 @@ def offset_series(scenario: str, calibrate: bool) -> dict[str, tuple[Edge, ...]]
     After calibration every lane sits at the slowest lane's skew, not at 0: trims only delay.
     """
     s = SCENARIOS[scenario]
-    series = {"measured": run_scenario(s.commands, s.timing)}
+    series = {"measured": run(s).edges}
     if calibrate:
         result = calibrate_scenario(scenario)
         trims = {lane: cal.trim_cycles for lane, cal in result.lanes.items()}
-        series["after calibration"] = run_scenario(s.commands, s.timing, trims=trims)
+        series["after calibration"] = run(s, trims=trims).edges
     return series
 
 

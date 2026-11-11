@@ -9,12 +9,13 @@ from qtwin.device import registers as r
 from qtwin.device.clock import drift_offset
 from qtwin.device.device import LaneTiming
 from qtwin.scenarios import SCENARIOS, ideal_commands, long_commands, run_scenario
+from qtwin.scenarios import run as run_full
 from qtwin.scope import LANES, Edge, component
 
 
 def run(name: str) -> tuple[Edge, ...]:
-    s = SCENARIOS[name]
-    return run_scenario(s.commands, s.timing)
+    # Each scenario's own bus and host model (M5); for M4 scenarios that is the prefill path.
+    return run_full(SCENARIOS[name]).edges
 
 
 def actual_of(edges: tuple[Edge, ...], channel: str, ideal: int) -> int:
@@ -23,7 +24,11 @@ def actual_of(edges: tuple[Edge, ...], channel: str, ideal: int) -> int:
 
 
 def test_registry_matches_the_plan_table() -> None:
-    assert list(SCENARIOS) == ["ideal", "skew_some", "drift_some", "mixed", "one_both"]
+    # M5 appended its three bus scenarios to the M4 table (planned extension, not a fix).
+    assert list(SCENARIOS) == [
+        *("ideal", "skew_some", "drift_some", "mixed", "one_both"),
+        *("bus_jitter", "underrun", "overflow"),
+    ]
     assert all(s.name == name for name, s in SCENARIOS.items())
 
 
@@ -56,7 +61,8 @@ def test_ideal_scenario_keeps_the_short_m3_list() -> None:
 def test_commands_are_ordered_and_fit_the_fifo(name: str) -> None:
     stamps = [c.timestamp_cycles for c in SCENARIOS[name].commands]
     assert stamps == sorted(stamps)
-    assert len(stamps) <= r.FIFO_CAPACITY
+    # overflow is the one scenario built to exceed the FIFO (M5); every other one must fit.
+    assert (len(stamps) > r.FIFO_CAPACITY) == (name == "overflow")
 
 
 def test_long_commands_span_a_million_cycles_on_every_output_lane() -> None:

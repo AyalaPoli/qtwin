@@ -14,15 +14,14 @@ from pathlib import Path
 
 import pytest
 
-from qtwin.scenarios import SCENARIOS, run_scenario
+from qtwin.scenarios import SCENARIOS, run
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 
 
 @pytest.mark.parametrize("name", SCENARIOS)
 def test_trace_matches_golden(name: str) -> None:
-    scenario = SCENARIOS[name]
-    actual = [dataclasses.asdict(e) for e in run_scenario(scenario.commands, scenario.timing)]
+    actual = [dataclasses.asdict(e) for e in run(SCENARIOS[name]).edges]
     golden = GOLDEN_DIR / f"{name}.json"
     if os.environ.get("QTWIN_REGEN_GOLDEN") == "1":
         GOLDEN_DIR.mkdir(exist_ok=True)

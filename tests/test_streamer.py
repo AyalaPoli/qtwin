@@ -10,15 +10,13 @@ from qtwin.bus import Bus
 from qtwin.device import registers as r
 from qtwin.device.device import Device
 from qtwin.driver.base import margin_cycles, read_cycle, stream
+from qtwin.scenarios import stream_commands
 from qtwin.scope import Edge
 
 STATUS = r.addr("SYSTEM.STATUS")
 GPIO0 = r.addr("GPIO0.LEVEL")
 LATENCY, JITTER = 20, 30
-LANE_REGS = [r.addr(f"AOM{i}.PHASE") for i in range(4)]
-LANE_REGS += [r.addr(f"GPIO{i}.LEVEL") for i in range(4)]
-# 40 commands, 100 cycles apart, round-robin over the 8 output lanes [assumed values].
-CMDS = [r.Command(10_000 + 100 * i, LANE_REGS[i % 8], i) for i in range(40)]
+CMDS = stream_commands()  # 40 commands, 100 cycles apart, all 8 output lanes
 
 
 def streamed(lead: int, seed: int = 1, latency: int = LATENCY, jitter: int = JITTER) -> Device:
