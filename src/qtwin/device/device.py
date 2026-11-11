@@ -12,8 +12,13 @@ and a delay line after the register.
 
 Timed commands: the host writes CMD_WORDS words to FIFO.CMD_PUSH; the last word commits the command
 into the FIFO; the sequencer applies it at its timestamp and every output write goes to the Scope.
+
+Two event sources share the clock (M5): bus writes arriving at their arrival cycle, and sequencer
+commands at their timestamp. run_until merges them in cycle order; on the same cycle the bus write
+is applied first, so a frame completing on its own timestamp cycle is still on time [assumed].
 """
 
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -97,11 +102,14 @@ class Device:
         self._frame: list[int] = []
         # Commands dropped on overflow since reset (what FIFO.DROPPED reads), 0..REG_MASK.
         self._dropped = 0
+        # Bus writes in flight: (arrival cycle, address, value), arrival order = issue order.
+        self._pending: deque[tuple[int, int, int]] = deque()
         self.reset()
 
     def reset(self) -> None:
         """Return every register (incl. the CYCLE_HI shadow) to its reset value; zero the clock;
-        empty the FIFO, discard any half-written CMD_PUSH frame and zero the dropped counter.
+        empty the FIFO, discard any half-written CMD_PUSH frame and bus writes still in flight
+        [assumed: the bus port is reset like the rest], and zero the dropped counter.
 
         Same effect as power-on or the host writing CTRL.RESET. The Scope is not cleared: it is
         an external instrument watching the outputs, not part of the device.
@@ -111,6 +119,7 @@ class Device:
         self._fifo.clear()
         self._frame = []
         self._dropped = 0
+        self._pending.clear()
 
     @property
     def irq_line(self) -> bool:
@@ -154,11 +163,7 @@ class Device:
         address or a write to an RO register. A CMD_PUSH write that completes a frame can also
         raise BusError (bad target); a full FIFO drops the command (see push_command).
         """
-        if not 0 <= value <= REG_MASK:
-            raise ValueError(f"value must fit in 32 bits, got {value}")
-        reg = self._decode(address)
-        if reg.access is Access.RO:
-            raise BusError(f"{reg.name} is read-only")
+        reg = self.check_write(address, value)
         if address == _CTRL and value & CTRL_RESET:
             # Self-clearing: the reset restores CTRL to 0, so RESET reads back 0 and any RUN bit
             # in the same write is discarded. The device always comes out of reset stopped.
@@ -172,6 +177,37 @@ class Device:
         else:
             # WO: FIFO.CMD_PUSH, the only write-only register.
             self._push_word(value)
+
+    def check_write(self, address: int, value: int) -> Register:
+        """Raise exactly as write() would for a bad value, address or RO register; change nothing.
+
+        The bus calls it at issue time, so a bad write fails at the host's call, not on arrival.
+        """
+        if not 0 <= value <= REG_MASK:
+            raise ValueError(f"value must fit in 32 bits, got {value}")
+        reg = self._decode(address)
+        if reg.access is Access.RO:
+            raise BusError(f"{reg.name} is read-only")
+        return reg
+
+    def schedule_write(self, arrival_cycle: int, address: int, value: int) -> int:
+        """Bus port: apply write(address, value) at `arrival_cycle` (absolute cycles).
+
+        Returns the cycle it will actually land: never before an earlier write still in flight,
+        because the bus delivers in issue order [assumed: like AXI writes with one ID]. If that is
+        the current cycle the write is applied now. Raises ValueError for a cycle in the past.
+        """
+        if arrival_cycle < self.clock.now:
+            raise ValueError(f"arrival {arrival_cycle} is in the past (now={self.clock.now})")
+        if self._pending:
+            arrival_cycle = max(arrival_cycle, self._pending[-1][0])
+        if arrival_cycle == self.clock.now:
+            # Nothing can be pending here: every pending write lands after now, and this one
+            # would have been held behind it. So applying now keeps the order.
+            self.write(address, value)
+        else:
+            self._pending.append((arrival_cycle, address, value))
+        return arrival_cycle
 
     # --- Device side ---
 
@@ -200,18 +236,34 @@ class Device:
     def run_until(self, cycle: int) -> None:
         """Advance simulated time to absolute `cycle` (in cycles).
 
+        Bus writes in flight land at their arrival cycle, before the sequencer on that cycle.
         While CTRL.RUN is set, every queued command due by then is applied at its timestamp.
         While stopped the clock still counts but nothing is applied [assumed], so the host can fill
         the FIFO before starting. Raises ValueError if `cycle` is before the current time.
         """
-        if self._values[_CTRL] & CTRL_RUN:
-            self._sequencer.run_until(cycle)
-        elif cycle < self.clock.now:
+        if cycle < self.clock.now:
             raise ValueError(f"cycle {cycle} is in the past (now={self.clock.now})")
-        else:
-            self.clock.advance(cycle - self.clock.now)
+        while self._pending and self._pending[0][0] <= cycle:
+            arrival, address, value = self._pending.popleft()
+            # Sequencer up to the cycle before, then the write at its cycle. Several writes can
+            # land on one cycle; only the first moves time, and all of them still go before the
+            # sequencer's turn on that cycle. The write may be CTRL.RUN, so the running state is
+            # re-read for each stretch.
+            if arrival > self.clock.now:
+                self._advance(arrival - 1)
+                self.clock.advance(1)
+            self.write(address, value)
+        self._advance(cycle)
 
     # --- Internals ---
+
+    def _advance(self, cycle: int) -> None:
+        # Time passes up to `cycle` (>= now, checked by run_until) with no bus write landing;
+        # the sequencer runs only while RUN.
+        if self._values[_CTRL] & CTRL_RUN:
+            self._sequencer.run_until(cycle)
+        else:
+            self.clock.advance(cycle - self.clock.now)
 
     def _push_word(self, word: int) -> None:
         self._frame.append(word)
