@@ -117,6 +117,6 @@ def test_reading_cmd_push_raises(bus: Bus) -> None:
         bus.read32(r.addr("FIFO.CMD_PUSH"))
 
 
-def test_writing_cmd_push_is_accepted_without_effect_in_m1(bus: Bus) -> None:
+def test_single_cmd_push_word_is_accepted_as_a_partial_frame(bus: Bus) -> None:
     bus.write32(r.addr("FIFO.CMD_PUSH"), 0x1234)
-    assert bus.read32(r.addr("FIFO.LEVEL")) == 0  # the FIFO itself arrives in M2
+    assert bus.read32(r.addr("FIFO.LEVEL")) == 0  # a command needs CMD_WORDS writes
