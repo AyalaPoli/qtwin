@@ -9,11 +9,12 @@ from qtwin.analysis.plots import (
     main,
     offset_axis_limits,
     offset_bars,
+    offset_series,
     offset_vs_time_plot,
     timing_diagram,
 )
 from qtwin.scenarios import SCENARIOS, ideal_commands, run_scenario
-from qtwin.scope import Edge
+from qtwin.scope import Edge, channel_offsets
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
@@ -96,3 +97,18 @@ def test_offset_axis_spans_at_least_one_cycle_each_way() -> None:
 def test_offset_axis_covers_the_data_with_one_cycle_headroom() -> None:
     assert offset_axis_limits([0, 3, 1]) == (-1, 4)
     assert offset_axis_limits([-2, 0]) == (-3, 1)
+
+
+def test_offset_series_has_one_entry_without_calibration() -> None:
+    assert list(offset_series("skew_some", calibrate=False)) == ["measured"]
+
+
+def test_offset_series_adds_after_calibration() -> None:
+    series = offset_series("skew_some", calibrate=True)
+    assert list(series) == ["measured", "after calibration"]
+    assert set(channel_offsets(series["after calibration"]).values()) == {3}
+
+
+def test_cli_calibrate_writes_plots(tmp_path: Path) -> None:
+    paths = cli(["--scenario", "one_both", "--calibrate", "--out", str(tmp_path)])
+    assert all(p.exists() for p in paths)

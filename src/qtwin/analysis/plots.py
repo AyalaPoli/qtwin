@@ -3,7 +3,7 @@
 Each function takes edges and an output path and returns the path. They use Figure objects with
 an explicit Agg canvas instead of pyplot, so there is no global figure state and no GUI backend.
 Run `python -m qtwin.analysis.plots --scenario NAME` (default ideal) to write one scenario's plots
-to out/NAME/.
+to out/NAME/. Add `--calibrate` to put an "after calibration" series (M6 trims) in the offset bars.
 """
 
 import argparse
@@ -16,7 +16,7 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
 from qtwin.analysis.stats import linear_fit
-from qtwin.scenarios import SCENARIOS, run_scenario
+from qtwin.scenarios import SCENARIOS, calibrate_scenario, run_scenario
 from qtwin.scope import LANES, Edge, channel_offsets, component, offset_vs_time
 
 # Colors from a validated colorblind-safe categorical palette (slots 1 and 2), plus neutrals.
@@ -171,17 +171,35 @@ def offset_vs_time_plot(edges: tuple[Edge, ...], path: Path) -> Path:
     return _save(fig, path)
 
 
-def main(scenario: str = "ideal", out_dir: Path = Path("out")) -> list[Path]:
-    """Run `scenario` and write its three plots to out_dir/<scenario>/ (created if missing).
+def offset_series(scenario: str, calibrate: bool) -> dict[str, tuple[Edge, ...]]:
+    """Traces for the offset bar chart: {"measured": ...} and, if `calibrate`, also
+    {"after calibration": ...}, the same commands rerun with the trims M6 calibration found.
 
-    Raises KeyError for an unknown scenario name.
+    After calibration every lane sits at the slowest lane's skew, not at 0: trims only delay.
     """
     s = SCENARIOS[scenario]
-    edges = run_scenario(s.commands, s.timing)
+    series = {"measured": run_scenario(s.commands, s.timing)}
+    if calibrate:
+        result = calibrate_scenario(scenario)
+        trims = {lane: cal.trim_cycles for lane, cal in result.lanes.items()}
+        series["after calibration"] = run_scenario(s.commands, s.timing, trims=trims)
+    return series
+
+
+def main(
+    scenario: str = "ideal", out_dir: Path = Path("out"), calibrate: bool = False
+) -> list[Path]:
+    """Run `scenario` and write its three plots to out_dir/<scenario>/ (created if missing).
+
+    calibrate: also show offsets after M6 calibration in offset_bars.png.
+    Raises KeyError for an unknown scenario name.
+    """
+    series = offset_series(scenario, calibrate)
+    edges = series["measured"]
     folder = out_dir / scenario
     return [
         timing_diagram(edges, folder / "timing.png"),
-        offset_bars({"measured": edges}, folder / "offset_bars.png"),
+        offset_bars(series, folder / "offset_bars.png"),
         offset_vs_time_plot(edges, folder / "offset_vs_time.png"),
     ]
 
@@ -194,8 +212,11 @@ def cli(argv: Sequence[str] | None = None) -> list[Path]:
     parser = argparse.ArgumentParser(description="Write a scenario's plots as PNG files.")
     parser.add_argument("--scenario", choices=list(SCENARIOS), default="ideal")
     parser.add_argument("--out", type=Path, default=Path("out"), help="parent output folder")
+    parser.add_argument(
+        "--calibrate", action="store_true", help='add an "after calibration" offset series'
+    )
     args = parser.parse_args(argv)
-    return main(args.scenario, args.out)
+    return main(args.scenario, args.out, args.calibrate)
 
 
 if __name__ == "__main__":
