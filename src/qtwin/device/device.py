@@ -15,7 +15,11 @@ from qtwin.device.registers import (
     Access,
     BusError,
     Register,
+    addr,
 )
+
+_CYCLE_LO = addr("CLOCK.CYCLE_LO")
+_CYCLE_HI = addr("CLOCK.CYCLE_HI")
 
 
 class Device:
@@ -33,6 +37,14 @@ class Device:
         reg = self._decode(address)
         if reg.access is Access.WO:
             raise BusError(f"{reg.name} is write-only")
+        if address == _CYCLE_LO:
+            # The 64-bit counter needs two 32-bit reads and keeps running in between. Sampling it
+            # once here and parking the high half in CYCLE_HI (the shadow) makes the LO-then-HI
+            # pair one snapshot. CYCLE_HI itself is a plain stored value: reading it never
+            # re-samples, so reading HI first returns whatever the last LO read latched.
+            now = self.clock.now
+            self._values[_CYCLE_HI] = now >> 32
+            return now & REG_MASK
         return self._values[address]
 
     def write(self, address: int, value: int) -> None:
