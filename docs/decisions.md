@@ -85,11 +85,15 @@
 - **Golden trace:** `tests/golden/ideal.json`, exact comparison. Regenerate with
   `$env:QTWIN_REGEN_GOLDEN=1; pytest tests/test_golden.py`; that run still fails, so a regeneration
   is never silent, then review `git diff tests/golden`.
-- **`scenarios.py` holds only `ideal_commands()` and `run_scenario()`** for now [assumed]; the Scenario
+- **`scenarios.py` holds only `ideal_commands()` and `run_scenario()`** for now (confirmed); the Scenario
   dataclass and registry are M4. `run_scenario` goes through Bus/CMD_PUSH, the real path.
 - **Plots use `Figure` + explicit Agg canvas, not pyplot**: no global state, no GUI backend.
   Offset vs time is small multiples (one panel per lane, shared axes) instead of 10 colors on one chart.
   `offset_bars` takes a label -> trace mapping, so M6's "after calibration" is a second entry.
 - **Deferred:** FIFO fill level (M5), bus-jitter histogram (M5) and polling vs interrupt latency
   histograms (M7). Their data doesn't exist yet. Plotting them now would mean inventing it.
-
+- **Ideal scenario values and timings are arbitrary** but fixed (confirmed). They only need to cover
+  all 8 output lanes, include a same-cycle tie and fit the FIFO.
+- **Lanes with no edges are labelled "no edges"** in the offset bar chart (confirmed). Zero offsets
+  were first drawn as no bar at all; commit bb78775 added a "0" label on every lane that has edges,
+  because an invisible zero bar looked the same as a lane with no edges.
