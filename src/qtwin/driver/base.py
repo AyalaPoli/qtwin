@@ -18,9 +18,18 @@ time, so margin >= -1 guarantees an on-time command; margin >= 0 leaves one spar
 """
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 from qtwin.bus import Bus
-from qtwin.device.registers import CMD_WORDS, REG_MASK, Command, addr, encode_command
+from qtwin.device.registers import (
+    CMD_WORDS,
+    CTRL_RUN,
+    FIFO_CAPACITY,
+    REG_MASK,
+    Command,
+    addr,
+    encode_command,
+)
 
 _CMD_PUSH = addr("FIFO.CMD_PUSH")
 
@@ -97,3 +106,33 @@ def unwrap_ts(last_ts: int, t_ref: int) -> int:
     # Python's % is never negative, so this also works when t_ref's low bits have wrapped past
     # last_ts (e.g. click at 2^32 - 5, t_ref at 2^32 + 10): the distance comes out as 15.
     return t_ref - ((t_ref & REG_MASK) - last_ts) % (REG_MASK + 1)
+
+
+@dataclass(frozen=True)
+class DriverLog:
+    """What a refill/detection driver (polling or interrupt, M7) saw and did.
+
+    detections: for each detector click, in click order, the host cycle at which the driver
+        learned of it (when the read that showed it returned). latency = detection - click.
+    pushed: commands written to CMD_PUSH (refill stream plus any feedback commands).
+    """
+
+    detections: tuple[int, ...]
+    pushed: int
+
+
+def start_stream(
+    bus: Bus, wait_until: Callable[[int], None], commands: Sequence[Command], now: int
+) -> tuple[int, int]:
+    """Fill the empty FIFO with the first commands (up to FIFO_CAPACITY), then set CTRL.RUN.
+
+    now: host time in cycles when called. Returns (commands pushed, host time after the last
+    write). Frames go out back to back, one word per cycle.
+    """
+    first = commands[:FIFO_CAPACITY]
+    for k, cmd in enumerate(first):
+        push_frame(bus, wait_until, cmd, now + CMD_WORDS * k)
+    now += CMD_WORDS * len(first)
+    wait_until(now)
+    bus.write32(addr("SYSTEM.CTRL"), CTRL_RUN)
+    return len(first), now
