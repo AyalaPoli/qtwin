@@ -14,6 +14,7 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
 from qtwin.analysis.stats import linear_fit
+from qtwin.scenarios import ideal_commands, run_scenario
 from qtwin.scope import LANES, Edge, channel_offsets, component, offset_vs_time
 
 # Colors from a validated colorblind-safe categorical palette (slots 1 and 2), plus neutrals.
@@ -147,3 +148,18 @@ def offset_vs_time_plot(edges: tuple[Edge, ...], path: Path) -> Path:
     fig.supylabel("offset (cycles)", color=TEXT_MUTED, fontsize=9)
     fig.suptitle("Offset vs time per channel (flat = skew, slope = drift)", x=0.02, ha="left")
     return _save(fig, path)
+
+
+def main(out_dir: Path = Path("out")) -> list[Path]:
+    """Run the ideal scenario and write its three plots to `out_dir` (created if missing)."""
+    edges = run_scenario(ideal_commands())
+    return [
+        timing_diagram(edges, out_dir / "timing.png"),
+        offset_bars({"measured": edges}, out_dir / "offset_bars.png"),
+        offset_vs_time_plot(edges, out_dir / "offset_vs_time.png"),
+    ]
+
+
+if __name__ == "__main__":
+    for written in main():
+        print(written)

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from qtwin.analysis.plots import offset_bars, offset_vs_time_plot, timing_diagram
+from qtwin.analysis.plots import main, offset_bars, offset_vs_time_plot, timing_diagram
 from qtwin.scenarios import ideal_commands, run_scenario
 from qtwin.scope import Edge
 
@@ -54,3 +54,11 @@ def test_offset_vs_time_writes_png(tmp_path: Path, name: str) -> None:
 def test_plot_creates_missing_parent_directory(tmp_path: Path) -> None:
     out = timing_diagram(SKEWED, tmp_path / "new" / "timing.png")
     assert_png(out)
+
+
+def test_main_writes_the_three_ideal_plots(tmp_path: Path) -> None:
+    paths = main(tmp_path)
+    assert sorted(p.name for p in paths) == ["offset_bars.png", "offset_vs_time.png", "timing.png"]
+    for path in paths:
+        assert path.parent == tmp_path
+        assert_png(path)
