@@ -15,7 +15,7 @@ Directory layout (DECIDED; do NOT use sim/ and hal/):
 ```
 src/qtwin/
   timebase.py            seconds <-> integer cycles, explicit rounding (half-even)
-  device/                clock.py registers.py fifo.py sequencer.py aom.py gpio.py snspd.py device.py
+  device/                clock.py registers.py fifo.py sequencer.py snspd.py device.py (AOM/GPIO registers live in device.py)
   bus.py                 read32/write32 with named bus_latency_cycles and seeded jitter
   driver/                base.py polling.py interrupt.py calibration.py
   scope.py               virtual oscilloscope / logic analyzer + measurement helpers
