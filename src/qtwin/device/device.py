@@ -30,6 +30,7 @@ from qtwin.device.registers import (
     REG_MASK,
     REGISTERS,
     STATUS_LATE,
+    STATUS_OVERFLOW,
     Access,
     BusError,
     Command,
@@ -47,6 +48,7 @@ _IRQ_ENABLE = addr("SYSTEM.IRQ_ENABLE")
 _CYCLE_LO = addr("CLOCK.CYCLE_LO")
 _CYCLE_HI = addr("CLOCK.CYCLE_HI")
 _FIFO_LEVEL = addr("FIFO.LEVEL")
+_FIFO_DROPPED = addr("FIFO.DROPPED")
 # Lanes that have a SKEW_TRIM register (AOM and GPIO; SNSPD has none).
 _SKEW_TRIM = {
     lane: BY_NAME[f"{lane}.SKEW_TRIM"].address for lane in LANES if f"{lane}.SKEW_TRIM" in BY_NAME
@@ -93,11 +95,13 @@ class Device:
         self._values: dict[int, int] = {}
         # CMD_PUSH words received so far for the command being assembled (< CMD_WORDS).
         self._frame: list[int] = []
+        # Commands dropped on overflow since reset (what FIFO.DROPPED reads), 0..REG_MASK.
+        self._dropped = 0
         self.reset()
 
     def reset(self) -> None:
         """Return every register (incl. the CYCLE_HI shadow) to its reset value; zero the clock;
-        empty the FIFO and discard any half-written CMD_PUSH frame.
+        empty the FIFO, discard any half-written CMD_PUSH frame and zero the dropped counter.
 
         Same effect as power-on or the host writing CTRL.RESET. The Scope is not cleared: it is
         an external instrument watching the outputs, not part of the device.
@@ -106,6 +110,7 @@ class Device:
         self._values = {reg.address: reg.reset for reg in REGISTERS}
         self._fifo.clear()
         self._frame = []
+        self._dropped = 0
 
     @property
     def irq_line(self) -> bool:
@@ -138,6 +143,8 @@ class Device:
         if address == _FIFO_LEVEL:
             # Computed from the FIFO itself, like irq_line, so it can never go stale.
             return len(self._fifo)
+        if address == _FIFO_DROPPED:
+            return self._dropped
         return self._values[address]
 
     def write(self, address: int, value: int) -> None:
@@ -145,7 +152,7 @@ class Device:
 
         Raises ValueError if value is outside 0..2^32-1 (no silent masking), BusError for a bad
         address or a write to an RO register. A CMD_PUSH write that completes a frame can also
-        raise BusError (bad target) or FifoFullError.
+        raise BusError (bad target); a full FIFO drops the command (see push_command).
         """
         if not 0 <= value <= REG_MASK:
             raise ValueError(f"value must fit in 32 bits, got {value}")
@@ -177,13 +184,18 @@ class Device:
         self._values[_IRQ_STATUS] |= mask
 
     def push_command(self, cmd: Command) -> None:
-        """Queue a command directly, skipping CMD_PUSH framing (for tests).
+        """Queue a command, skipping CMD_PUSH framing (tests); a completed bus frame ends here too.
 
-        Same checks as a bus push: BusError for a non-output target, FifoFullError if full.
+        Raises BusError for a non-output target. If the FIFO is full the command is dropped:
+        STATUS.OVERFLOW (and IRQ) is set and FIFO.DROPPED counts it. Queued commands are untouched.
         """
         if cmd.target not in OUTPUT_TARGETS:
             raise BusError(f"command target {cmd.target:#x} is not an output register")
-        self._fifo.push(cmd)
+        if not self._fifo.push(cmd):
+            # Tail drop: the commands already queued were accepted first and keep their slots.
+            # Saturate instead of wrapping, so a huge count can never read back as a small one.
+            self._dropped = min(self._dropped + 1, REG_MASK)
+            self.set_status(STATUS_OVERFLOW)
 
     def run_until(self, cycle: int) -> None:
         """Advance simulated time to absolute `cycle` (in cycles).

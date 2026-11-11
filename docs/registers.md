@@ -55,6 +55,7 @@ Every access also raises `BusError` for an unaligned or unmapped address. Writin
 | FIFO | 0x04 | LEVEL | RO | 0 | commands queued (computed from the FIFO) |
 | FIFO | 0x08 | CAPACITY | RO | 64 | commands [assumed] |
 | FIFO | 0x0C | LOW_WATERMARK | RW | 16 | commands [assumed] |
+| FIFO | 0x10 | DROPPED | RO | 0 | commands dropped on overflow since reset; saturates at 2^32-1 (M5) |
 
 AOMn is at 0x100 + n * 0x100 (n = 0..3), GPIOn at 0x500 + n * 0x100, SNSPDn at 0x900 + n * 0x100.
 
@@ -72,7 +73,7 @@ AOMn is at 0x100 + n * 0x100 (n = 0..3), GPIOn at 0x500 + n * 0x100, SNSPDn at 0
 | Bit | Name | Set when |
 |-----|------|----------|
 | 0 | UNDERRUN | FIFO ran empty while commands were still expected (M5) |
-| 1 | OVERFLOW | command pushed into a full FIFO (M5) |
+| 1 | OVERFLOW | a command was committed into a full FIFO and dropped (M5) |
 | 2 | LATE | command timestamp already in the past when it reached the sequencer (M2) |
 
 **IRQ_STATUS / IRQ_ENABLE**
@@ -123,7 +124,9 @@ absolute cycle `timestamp_cycles`. The host sends it as **4 writes to CMD_PUSH**
   `AOMn.ENABLE`, `GPIOn.LEVEL`. Any other target raises `BusError` on word 3 and the command is
   dropped; the next write starts a fresh frame.
 - Words 0-2 alone never reach the FIFO. CTRL.RESET discards a half-written frame and empties the FIFO.
-- Committing into a full FIFO raises `FifoFullError` (M2; M5 turns this into drop + STATUS.OVERFLOW).
+- Committing into a full FIFO **drops that command** (tail drop, M5): STATUS.OVERFLOW and
+  IRQ_STATUS.OVERFLOW are set and FIFO.DROPPED counts it. Commands already queued are untouched.
+  The frame is complete, so the next write starts a fresh frame.
 - The FIFO is strictly in order. Commands run only while CTRL.RUN is set. A command whose timestamp
   has already passed when it reaches the head runs immediately and sets STATUS.LATE and IRQ_STATUS.LATE.
 - `encode_command` / `decode_command` in `registers.py` build and parse the 4 words.

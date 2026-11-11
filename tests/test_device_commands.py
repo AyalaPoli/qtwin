@@ -5,7 +5,6 @@ import pytest
 from qtwin.bus import Bus
 from qtwin.device import registers as r
 from qtwin.device.device import Device
-from qtwin.device.fifo import FifoFullError
 from qtwin.device.registers import BusError, Command
 from qtwin.scope import Edge, Scope
 
@@ -109,11 +108,60 @@ def test_level_counts_up_on_push_and_down_as_commands_fire(device: Device, bus: 
     assert bus.read32(LEVEL) == 0
 
 
-def test_full_fifo_raises(device: Device) -> None:
+# --- Overflow (M5 replaces M2's FifoFullError: drop is the hardware policy planned in M2) ---
+
+DROPPED = r.addr("FIFO.DROPPED")
+
+
+def fill(device: Device) -> None:
     for ts in range(r.FIFO_CAPACITY):
         device.push_command(Command(ts, GPIO0, 1))
-    with pytest.raises(FifoFullError):
-        device.push_command(Command(999, GPIO0, 1))
+
+
+def test_full_fifo_drops_the_new_command(device: Device, bus: Bus) -> None:
+    fill(device)
+    device.push_command(Command(999, GPIO0, 1))
+    assert bus.read32(LEVEL) == r.FIFO_CAPACITY
+    assert bus.read32(DROPPED) == 1
+    start(bus)
+    device.run_until(1_000)
+    # The 64 queued commands all ran; the dropped one (ts 999) never did.
+    assert [e.ideal_cycle for e in device.scope.edges] == list(range(r.FIFO_CAPACITY))
+
+
+def test_overflow_over_bus_sets_sticky_status_and_irq(device: Device, bus: Bus) -> None:
+    fill(device)
+    push_over_bus(bus, Command(999, GPIO0, 1))
+    push_over_bus(bus, Command(1_000, GPIO0, 0))
+    assert bus.read32(STATUS) == r.STATUS_OVERFLOW
+    assert bus.read32(IRQ_STATUS) == r.IRQ_OVERFLOW
+    assert bus.read32(DROPPED) == 2
+
+
+def test_overflow_frame_does_not_misalign_the_next_one(device: Device, bus: Bus) -> None:
+    fill(device)
+    push_over_bus(bus, Command(999, GPIO0, 1))
+    start(bus)
+    device.run_until(100)  # drains the FIFO
+    push_over_bus(bus, Command(500, AOM1_AMPL, 7))
+    device.run_until(500)
+    assert device.scope.edges[-1] == Edge("AOM1.AMPL", ideal_cycle=500, actual_cycle=500, value=7)
+
+
+def test_dropped_counter_is_cleared_by_reset(device: Device, bus: Bus) -> None:
+    fill(device)
+    device.push_command(Command(999, GPIO0, 1))
+    bus.write32(CTRL, r.CTRL_RESET)
+    assert bus.read32(DROPPED) == 0
+
+
+def test_dropped_counter_saturates_at_32_bits(device: Device, bus: Bus) -> None:
+    # 2^32 drops can't be produced in a test; start the counter just below its maximum.
+    device._dropped = r.REG_MASK - 1
+    fill(device)
+    device.push_command(Command(999, GPIO0, 1))
+    device.push_command(Command(999, GPIO0, 1))
+    assert bus.read32(DROPPED) == r.REG_MASK
 
 
 # --- Execution ---

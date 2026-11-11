@@ -118,6 +118,7 @@ def test_freq_hz_reset_matches_timebase() -> None:
         ("SNSPD0.COUNT", r.Access.RO),
         ("FIFO.CMD_PUSH", r.Access.WO),
         ("FIFO.LOW_WATERMARK", r.Access.RW),
+        ("FIFO.DROPPED", r.Access.RO),
     ],
 )
 def test_access_types(name: str, access: r.Access) -> None:

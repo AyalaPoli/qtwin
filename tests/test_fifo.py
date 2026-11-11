@@ -3,8 +3,8 @@
 import pytest
 
 from qtwin.device import registers as r
-from qtwin.device.fifo import CommandFifo, FifoFullError
-from qtwin.device.registers import BusError, Command
+from qtwin.device.fifo import CommandFifo
+from qtwin.device.registers import Command
 
 GPIO0 = r.addr("GPIO0.LEVEL")
 
@@ -37,19 +37,17 @@ def test_len_counts_up_and_down() -> None:
     assert len(fifo) == 1
 
 
-def test_push_to_full_fifo_raises_and_keeps_contents() -> None:
+def test_push_to_full_fifo_is_refused_and_keeps_contents() -> None:
+    # M5: the FIFO reports a refused push instead of raising; the device decides the policy
+    # (drop + OVERFLOW). Replaces M2's FifoFullError tests: the behaviour changed as planned.
     fifo = CommandFifo(capacity=2)
-    fifo.push(cmd(1))
-    fifo.push(cmd(2))
-    with pytest.raises(FifoFullError):
-        fifo.push(cmd(3))
+    assert fifo.push(cmd(1)) is True
+    assert fifo.push(cmd(2)) is True
+    assert fifo.full
+    assert fifo.push(cmd(3)) is False
     assert len(fifo) == 2
     assert fifo.pop() == cmd(1)
-
-
-def test_fifo_full_is_a_bus_error() -> None:
-    # The host sees it as a rejected CMD_PUSH write.
-    assert issubclass(FifoFullError, BusError)
+    assert fifo.pop() == cmd(2)
 
 
 def test_peek_or_pop_on_empty_raises() -> None:

@@ -124,6 +124,7 @@ _FIFO: _Layout = [
     ("LEVEL", 0x04, Access.RO, 0),  # commands currently queued
     ("CAPACITY", 0x08, Access.RO, FIFO_CAPACITY),
     ("LOW_WATERMARK", 0x0C, Access.RW, FIFO_LOW_WATERMARK_RESET),
+    ("DROPPED", 0x10, Access.RO, 0),  # commands dropped on overflow, saturating; see device.py
 ]
 
 
