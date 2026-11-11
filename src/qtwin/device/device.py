@@ -176,9 +176,15 @@ class Device:
         self.push_command(decode_command((ts_lo, ts_hi, target, value)))
 
     def _apply(self, cmd: Command) -> None:
-        # Called by the sequencer with the clock already at the execution cycle.
+        # Called by the sequencer with the clock already at the execution cycle. For a late
+        # command that is after its timestamp, and the Scope keeps both so the miss is measurable.
         self._values[cmd.target] = cmd.value
-        self.scope.record(self.clock.now, BY_ADDRESS[cmd.target].name, cmd.value)
+        self.scope.record(
+            channel=BY_ADDRESS[cmd.target].name,
+            ideal_cycle=cmd.timestamp_cycles,
+            actual_cycle=self.clock.now,
+            value=cmd.value,
+        )
 
     def _late(self) -> None:
         self.set_status(STATUS_LATE)

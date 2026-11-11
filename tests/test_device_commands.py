@@ -53,7 +53,9 @@ def test_frame_over_bus_fires_at_its_timestamp(device: Device, bus: Bus) -> None
     push_over_bus(bus, Command(2**32 + 5, GPIO0, 1))
     start(bus)
     device.run_until(2**32 + 5)
-    assert device.scope.edges == (Edge(2**32 + 5, "GPIO0.LEVEL", 1),)
+    assert device.scope.edges == (
+        Edge(channel="GPIO0.LEVEL", ideal_cycle=2**32 + 5, actual_cycle=2**32 + 5, value=1),
+    )
 
 
 def test_reset_mid_frame_discards_the_partial_command(device: Device, bus: Bus) -> None:
@@ -63,7 +65,9 @@ def test_reset_mid_frame_discards_the_partial_command(device: Device, bus: Bus) 
     push_over_bus(bus, Command(10, GPIO0, 1))
     start(bus)
     device.run_until(10)
-    assert device.scope.edges == (Edge(10, "GPIO0.LEVEL", 1),)
+    assert device.scope.edges == (
+        Edge(channel="GPIO0.LEVEL", ideal_cycle=10, actual_cycle=10, value=1),
+    )
 
 
 def test_reset_empties_the_fifo(device: Device, bus: Bus) -> None:
@@ -123,7 +127,9 @@ def test_command_writes_the_register_at_its_cycle(device: Device, bus: Bus) -> N
     assert device.scope.edges == ()
     device.run_until(1000)
     assert bus.read32(AOM1_AMPL) == 42
-    assert device.scope.edges == (Edge(1000, "AOM1.AMPL", 42),)
+    assert device.scope.edges == (
+        Edge(channel="AOM1.AMPL", ideal_cycle=1000, actual_cycle=1000, value=42),
+    )
     assert device.clock.now == 1000
 
 
@@ -132,7 +138,10 @@ def test_ties_keep_fifo_order(device: Device, bus: Bus) -> None:
     device.push_command(Command(50, GPIO0, 0))
     start(bus)
     device.run_until(50)
-    assert device.scope.edges == (Edge(50, "GPIO0.LEVEL", 1), Edge(50, "GPIO0.LEVEL", 0))
+    assert device.scope.edges == (
+        Edge(channel="GPIO0.LEVEL", ideal_cycle=50, actual_cycle=50, value=1),
+        Edge(channel="GPIO0.LEVEL", ideal_cycle=50, actual_cycle=50, value=0),
+    )
     assert bus.read32(GPIO0) == 0
 
 
@@ -149,7 +158,9 @@ def test_command_due_while_stopped_runs_late_after_start(device: Device, bus: Bu
     device.run_until(100)
     start(bus)
     device.run_until(100)
-    assert device.scope.edges == (Edge(100, "GPIO0.LEVEL", 1),)
+    assert device.scope.edges == (
+        Edge(channel="GPIO0.LEVEL", ideal_cycle=10, actual_cycle=100, value=1),
+    )
     assert bus.read32(STATUS) & r.STATUS_LATE
 
 
@@ -158,7 +169,9 @@ def test_past_timestamp_sets_late_in_status_and_irq_status(device: Device, bus: 
     device.run_until(500)
     device.push_command(Command(100, GPIO0, 1))
     device.run_until(500)
-    assert device.scope.edges == (Edge(500, "GPIO0.LEVEL", 1),)
+    assert device.scope.edges == (
+        Edge(channel="GPIO0.LEVEL", ideal_cycle=100, actual_cycle=500, value=1),
+    )
     assert bus.read32(STATUS) == r.STATUS_LATE
     assert bus.read32(IRQ_STATUS) == r.IRQ_LATE
 
@@ -191,4 +204,4 @@ def test_device_uses_the_scope_it_is_given() -> None:
     device.push_command(Command(0, GPIO0, 1))
     Bus(device).write32(CTRL, r.CTRL_RUN)
     device.run_until(0)
-    assert scope.edges == (Edge(0, "GPIO0.LEVEL", 1),)
+    assert scope.edges == (Edge(channel="GPIO0.LEVEL", ideal_cycle=0, actual_cycle=0, value=1),)
