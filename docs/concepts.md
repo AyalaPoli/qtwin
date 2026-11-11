@@ -34,3 +34,10 @@
 3. The sequencer still acts at the commanded cycle; the delay lives after the register, in the output path. Scheduling and output timing are separate, as in hardware.
 4. Hardware delay lines can only add delay, so channels are aligned to the slowest one (SKEW_TRIM = max_skew - skew), never by moving an edge earlier.
 5. Faults are injected on purpose, with exact known values, so a test can check that a measurement recovers what was put in. Hand-computed edges check correctness; golden traces only detect change.
+
+## M6: Closed-loop calibration (measure, correct, verify)
+1. Calibration is a closed loop: send a known stimulus (one edge at the same cycle on every lane), measure the response on the Scope, write a correction (SKEW_TRIM), then measure again to prove the residual is 0.
+2. The driver does it only through registers and an external measurement, like a real host with an oscilloscope; it never peeks at the device's hidden fault values.
+3. Positive-only delay lines mean "aligned" is not "on time": every lane ends up as late as the slowest one, and they all land together.
+4. Two readings far apart separate the two faults: the early reading is the intercept (skew), the growth between them is the slope (drift). Measuring skew early keeps drift from leaking into it.
+5. Resolution is a limit of the measurement, not the math: the Scope sees whole cycles, so drift below one cycle per span (1 000 ppb over 10^6 cycles) reads as 0. A longer span finds smaller drift, at the cost of calibration time.

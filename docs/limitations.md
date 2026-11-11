@@ -17,7 +17,8 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
   ignores such writes silently. The model raises so that driver bugs show up immediately in tests.
   The same strictness applies to unaligned/unmapped addresses, reads of the write-only CMD_PUSH,
   and values outside 32 bits.
-- **Instant bus in M1.** `read32`/`write32` take 0 cycles. Bus latency and jitter arrive in M5.
+- **Instant bus.** `read32`/`write32` take 0 cycles. Bus latency and jitter are M5 (skipped for now),
+  so M6 calibration ignores bus timing.
 - **No counter wrap.** The 64-bit counter raises instead of wrapping at 2^64 (about 2,339 years at 250 MHz).
 - **Identification and sizes are invented:** ID, VERSION, FIFO CAPACITY (64), LOW_WATERMARK reset (16)
   and SNSPD THRESHOLD reset (0) are marked [assumed] in `docs/registers.md`.
@@ -30,7 +31,8 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
 - **Output timing is a per-lane formula** (M4): actual = issue cycle + skew + SKEW_TRIM +
   drift_offset(issue cycle, drift_ppb). In the `ideal` scenario on-time edges land exactly on the
   commanded cycle.
-- **Time moves only through `Device.run_until`**, called by tests. There is no free-running simulation loop.
+- **Time moves only through `Device.run_until`**, called by tests, or by the driver through the
+  `wait_until` callback the test bench passes in (M6). There is no free-running simulation loop.
 
 ## Scope and plots
 - **The Scope records register writes, not waveforms.** An edge is "this register took this value at
@@ -59,3 +61,17 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
 - **SNSPD skew is stored but has no effect** until M7: detectors have no edges and no SKEW_TRIM.
 - **The timing diagram can't show small offsets over long runs**: over 10^6 cycles, a 50-cycle
   offset is below one pixel. Use offset_vs_time. A zoomed window is a possible next step.
+
+## Calibration (M6)
+- **Drift below one cycle per span is undetectable.** The Scope sees whole cycles, so with T2 - T1 =
+  10^6 cycles anything under 1 000 ppb reads as 0 (a 900 ppb lane is asserted to read 0). Estimates
+  are +-1 cycle, i.e. +-1 000 ppb.
+- **Two points, no fit.** Drift comes from one edge at T1 and one at T2. No averaging, which is
+  enough here only because the model has no edge jitter.
+- **Skew reading includes early drift:** the T1 edge carries trunc(T1 * ppb / 10^9) cycles of drift.
+  It is 0 while T1 < 10^9 / ppb (33 333 cycles at 30 ppm); calibration uses T1 = 1 000.
+- **Drift is detected, not compensated.** Trims fix only skew; a drifting lane goes out of alignment
+  again. Continuous compensation is a next step.
+- **SNSPD lanes are not calibrated** (inputs, no SKEW_TRIM) until M7.
+- **Calibration assumes a fresh, otherwise idle device:** its edges share the FIFO and the Scope with
+  anything else queued.

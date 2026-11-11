@@ -123,3 +123,24 @@
 ## M5: Bus model (skipped for now)
 - **Skipped, not dropped** (confirmed). The bus stays instant (0 cycles, no jitter) through M6.
   Bus latency, jitter, FIFO drop + OVERFLOW and their seeds are still planned for M5.
+
+## M6: Driver calibration
+- **What:** `driver/calibration.py`: `calibrate(bus, scope, wait_until)` -> `CalibrationResult` of per-lane
+  `LaneCalibration(skew, trim, residual, drift_ppb, flagged)`; `scope.offsets_at`; `run_scenario(trims=...)`;
+  `calibrate_scenario(name)`; `python -m qtwin.analysis.plots --scenario NAME --calibrate`.
+- **`wait_until` is passed in** [assumed]: the driver can't import the device to advance time, so the
+  test bench hands it `device.run_until`. A `Bus.wait_until` was rejected: it mixes "time passes" into
+  the register path.
+- **Sequence:** edge at T1 = now + 1_000 (skew), write trims, verify edge at T1 + 1_000 (residual),
+  edge at T2 = T1 + 10^6 (drift). Residual = offset - max_skew, because trims align to the slowest lane.
+- **Drift estimate:** `((off2 - trim) - skew) * 10**9 // span`, integers only. The trim is subtracted
+  because the driver wrote it and knows it. Two points, no fit.
+- **`DRIFT_THRESHOLD_PPB = 2_000`** [assumed], flag on `|ppb| > threshold`. It must exceed one quantum
+  (1_000 ppb at span 10^6) so one staircase step can't cause a false positive.
+- **Calibration edges write back the current value** of AOM PHASE / GPIO LEVEL: a Scope edge with no
+  change to the output state.
+- **SNSPD lanes excluded** until M7 (no output edge, no SKEW_TRIM).
+- **Calibration uses only a scenario's timing**, not its commands; the plot then reruns the commands
+  with the found trims.
+- **One commit for calibration + harness + tests** instead of the planned three: skew and drift share
+  one measurement sequence, and the tests need `calibrate_scenario`.
