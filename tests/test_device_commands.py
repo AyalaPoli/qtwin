@@ -164,6 +164,67 @@ def test_dropped_counter_saturates_at_32_bits(device: Device, bus: Bus) -> None:
     assert bus.read32(DROPPED) == r.REG_MASK
 
 
+# --- Underrun (M5): a command committed into an empty FIFO after its timestamp, while running ---
+
+ERRORS = r.STATUS_UNDERRUN | r.STATUS_OVERFLOW | r.STATUS_LATE
+
+
+def running_at(device: Device, bus: Bus, cycle: int) -> None:
+    start(bus)
+    device.run_until(cycle)
+
+
+def test_late_commit_into_empty_fifo_sets_underrun_and_late(device: Device, bus: Bus) -> None:
+    running_at(device, bus, 500)
+    device.push_command(Command(400, GPIO0, 1))
+    # Flagged on the commit cycle itself, before any more time passes.
+    assert bus.read32(STATUS) & ERRORS == r.STATUS_UNDERRUN
+    assert bus.read32(IRQ_STATUS) & r.IRQ_UNDERRUN
+    device.run_until(500)
+    assert bus.read32(STATUS) & ERRORS == r.STATUS_UNDERRUN | r.STATUS_LATE
+    assert device.scope.edges[0].actual_cycle == 500
+
+
+def test_commit_on_its_own_timestamp_is_not_an_underrun(device: Device, bus: Bus) -> None:
+    running_at(device, bus, 500)
+    device.push_command(Command(500, GPIO0, 1))
+    device.run_until(500)
+    assert bus.read32(STATUS) & ERRORS == 0
+
+
+def test_late_commit_behind_queued_commands_is_late_only(device: Device, bus: Bus) -> None:
+    # The FIFO is not empty, so the sequencer was not starved: this is head-of-line blocking.
+    device.push_command(Command(1_000, GPIO0, 1))
+    running_at(device, bus, 500)
+    device.push_command(Command(400, GPIO0, 0))
+    device.run_until(1_000)
+    assert bus.read32(STATUS) & ERRORS == r.STATUS_LATE
+
+
+def test_late_commit_while_stopped_is_not_an_underrun(device: Device, bus: Bus) -> None:
+    # A stopped sequencer isn't consuming anything, so it can't be starved [assumed].
+    device.run_until(500)
+    device.push_command(Command(400, GPIO0, 1))
+    assert bus.read32(STATUS) & r.STATUS_UNDERRUN == 0
+
+
+def test_fifo_empty_after_the_last_command_is_not_an_underrun(device: Device, bus: Bus) -> None:
+    for ts in (100, 200):
+        device.push_command(Command(ts, GPIO0, ts // 100 % 2))
+    running_at(device, bus, 1_000_000)
+    assert bus.read32(STATUS) & ERRORS == 0
+
+
+def test_underrun_over_a_slow_bus_is_flagged_on_the_arrival_cycle(device: Device) -> None:
+    bus = Bus(device, bus_latency_cycles=50)
+    device.write(CTRL, r.CTRL_RUN)
+    push_over_bus(bus, Command(30, GPIO0, 1))  # all 4 words land at cycle 50
+    device.run_until(49)
+    assert bus.read32(STATUS) & r.STATUS_UNDERRUN == 0
+    device.run_until(50)
+    assert bus.read32(STATUS) & ERRORS == r.STATUS_UNDERRUN | r.STATUS_LATE
+
+
 # --- Execution ---
 
 
@@ -220,8 +281,9 @@ def test_past_timestamp_sets_late_in_status_and_irq_status(device: Device, bus: 
     assert device.scope.edges == (
         Edge(channel="GPIO0.LEVEL", ideal_cycle=100, actual_cycle=500, value=1),
     )
-    assert bus.read32(STATUS) == r.STATUS_LATE
-    assert bus.read32(IRQ_STATUS) == r.IRQ_LATE
+    # Committed late into an empty running FIFO, so since M5 this is also an underrun.
+    assert bus.read32(STATUS) == r.STATUS_LATE | r.STATUS_UNDERRUN
+    assert bus.read32(IRQ_STATUS) == r.IRQ_LATE | r.IRQ_UNDERRUN
 
 
 def test_on_time_commands_leave_status_clear(device: Device, bus: Bus) -> None:

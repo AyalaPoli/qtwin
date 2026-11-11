@@ -36,6 +36,7 @@ from qtwin.device.registers import (
     REGISTERS,
     STATUS_LATE,
     STATUS_OVERFLOW,
+    STATUS_UNDERRUN,
     Access,
     BusError,
     Command,
@@ -224,9 +225,19 @@ class Device:
 
         Raises BusError for a non-output target. If the FIFO is full the command is dropped:
         STATUS.OVERFLOW (and IRQ) is set and FIFO.DROPPED counts it. Queued commands are untouched.
+
+        Underrun: while running, a command committed into an EMPTY FIFO after its timestamp sets
+        STATUS.UNDERRUN (and IRQ) on this cycle; it then runs late (LATE) like any late command.
         """
         if cmd.target not in OUTPUT_TARGETS:
             raise BusError(f"command target {cmd.target:#x} is not an output register")
+        running = bool(self._values[_CTRL] & CTRL_RUN)
+        if running and len(self._fifo) == 0 and cmd.timestamp_cycles < self.clock.now:
+            # The sequencer reached this command's time with nothing to play: it was starved.
+            # This is the first cycle the device can know it (the command just arrived). A FIFO
+            # that empties after the last command never triggers this, since nothing arrives late.
+            # A late command behind others is head-of-line blocking: LATE only, not UNDERRUN.
+            self.set_status(STATUS_UNDERRUN)
         if not self._fifo.push(cmd):
             # Tail drop: the commands already queued were accepted first and keep their slots.
             # Saturate instead of wrapping, so a huge count can never read back as a small one.
