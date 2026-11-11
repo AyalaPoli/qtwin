@@ -109,7 +109,7 @@
   is shifted. SKEW_TRIM is read from the register at issue time (reset 0), so M6 only writes it.
 - **Drift is evaluated at the issue cycle** (the device clock when the sequencer applies the command).
   For on-time commands that equals the ideal timestamp, as planned; for a late command it is the
-  later cycle, because the output path drifts with real elapsed time [assumed].
+  later cycle, because the output path drifts with real elapsed time (confirmed before M6).
 - **Trace in issue order**, not sorted by actual_cycle; a test shows skew_some reorders across lanes.
 - **`ideal` keeps M3's 24-command list**, so `tests/golden/ideal.json` is byte-identical. Fault
   scenarios use `long_commands()` (56 commands, markers at 250k..1M cycles; fits the 64-entry FIFO).
@@ -119,3 +119,7 @@
   Seeds arrive with bus jitter (M5).
 - **Plots output moved** from out/*.png to out/<scenario>/*.png; the old main test was replaced
   because the interface changed.
+
+## M5: Bus model (skipped for now)
+- **Skipped, not dropped** (confirmed). The bus stays instant (0 cycles, no jitter) through M6.
+  Bus latency, jitter, FIFO drop + OVERFLOW and their seeds are still planned for M5.
