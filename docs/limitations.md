@@ -27,8 +27,20 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
 - **Applying a command takes 0 cycles**, and any number of commands can run on the same cycle.
   Real sequencers have a pipeline depth and a limited number of outputs changed per cycle.
 - **Every applied write is a Scope edge**, including a write of the value already present.
-- **Ideal outputs:** no skew or drift yet (M4). Edges land at exactly the commanded cycle.
+- **Ideal outputs:** no skew or drift yet (M4). On-time edges land at exactly the commanded cycle;
+  only a late command has actual > ideal.
 - **Time moves only through `Device.run_until`**, called by tests. There is no free-running simulation loop.
+
+## Scope and plots
+- **The Scope records register writes, not waveforms.** An edge is "this register took this value at
+  this cycle". There are no rise times, analog levels, glitches or AOM ramp-up.
+- **Offsets are whole cycles.** offset = actual - ideal, an integer number of 4 ns cycles (see Time).
+- **Per-channel offset is the earliest edge only.** It is one reading, not an average, so with drift
+  it ignores how the offset changes later; `offset_vs_time` shows the full series.
+- **All fields of one AOM share one lane** (FREQ_WORD, AMPL, PHASE, ENABLE), as one physical output.
+- **SNSPD lanes are empty until M7**: the detectors have no output edges in the model yet.
+- **The drift fit is plain least squares** on a staircase of whole-cycle slips, so the fitted ppb is
+  approximate (a hand-made 50 000 ppb trace fitted to ~49 300 ppb). Floats are used only there.
 
 ## Drift
 - Drift is integer parts-per-billion, truncated toward zero, so it appears as whole-cycle slips.

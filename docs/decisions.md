@@ -66,3 +66,30 @@
 - **Full FIFO raises** for now; drop + OVERFLOW is M5.
 - **The Scope records every applied write**, even one that doesn't change the value, so ties stay
   visible. CTRL.RESET does not clear it (it is an instrument outside the device).
+
+## M3: Scope and plots (reduced scope)
+- **What:** `Edge(channel, ideal_cycle, actual_cycle, value)`, helpers in `scope.py`
+  (`offset_vs_time`, `channel_offsets`, `edge_delay`), `analysis/stats.py` (`linear_fit`),
+  minimal `scenarios.py` (ideal only), golden trace, three plots in `analysis/plots.py`.
+- **Edge stores both cycles**, not just an offset, so plots can draw what was commanded next to what
+  happened. A late command is recorded honestly with actual > ideal.
+- **Field order changed**, so existing tests now build Edge with keyword arguments. The tests were not
+  wrong; the interface changed.
+- **Channel = register name; lane = component block** (`component("AOM1.AMPL") == "AOM1"`). Ten lanes:
+  4 AOM, 4 GPIO, 2 SNSPD. One address space, no second channel numbering.
+- **Per-channel offset = earliest edge** on the lane, the closest single reading of static skew
+  (drift has had least time to add to it). Rejected: mean (mixes drift into skew).
+- **`edge_delay` uses actual cycles** and the first dst edge at or after each src edge; an unmatched
+  src edge is skipped. This is the shape M7's click -> AOM latency needs.
+- **Helpers are integer; only `linear_fit` uses floats**, and only for plots.
+- **Golden trace:** `tests/golden/ideal.json`, exact comparison. Regenerate with
+  `$env:QTWIN_REGEN_GOLDEN=1; pytest tests/test_golden.py`; that run still fails, so a regeneration
+  is never silent, then review `git diff tests/golden`.
+- **`scenarios.py` holds only `ideal_commands()` and `run_scenario()`** for now [assumed]; the Scenario
+  dataclass and registry are M4. `run_scenario` goes through Bus/CMD_PUSH, the real path.
+- **Plots use `Figure` + explicit Agg canvas, not pyplot**: no global state, no GUI backend.
+  Offset vs time is small multiples (one panel per lane, shared axes) instead of 10 colors on one chart.
+  `offset_bars` takes a label -> trace mapping, so M6's "after calibration" is a second entry.
+- **Deferred:** FIFO fill level (M5), bus-jitter histogram (M5) and polling vs interrupt latency
+  histograms (M7). Their data doesn't exist yet. Plotting them now would mean inventing it.
+

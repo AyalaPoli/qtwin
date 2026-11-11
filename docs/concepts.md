@@ -20,3 +20,10 @@
 3. The simulation is event-driven: the clock jumps straight to the next command's timestamp, so a long run with few commands costs a few steps, not one step per cycle.
 4. A late command (timestamp already passed) is a missed deadline. The device runs it at once and sets a sticky LATE flag, so the miss is never silent.
 5. The output trace depends only on the commands and their timestamps, so the same input always gives the identical trace.
+
+## M3: Observability: commanded vs actual
+1. The Scope records two times per edge: the cycle the command asked for (ideal) and the cycle the output really changed (actual). You can only debug timing you can see.
+2. offset = actual - ideal. It is the one number that skew, drift, late commands and (later) latency all reduce to.
+3. A constant offset over time is static skew (calibrate once); an offset that grows with time is drift (needs tracking). Plotting offset vs time with a fitted line tells them apart: intercept = skew, slope = drift.
+4. Measurements stay integer cycles; floats appear only in the analysis fit, never in scheduling, so analysis can never change behaviour.
+5. A golden trace freezes the expected output of a known scenario. Any change in timing becomes a failing test and a reviewable diff, and regenerating it is a deliberate act.
