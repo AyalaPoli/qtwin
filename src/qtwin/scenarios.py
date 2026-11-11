@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from qtwin.bus import Bus
 from qtwin.device import registers as r
 from qtwin.device.device import Device, LaneTiming
+from qtwin.driver.calibration import CalibrationResult, calibrate
 from qtwin.scope import Edge
 
 PULSE_START_CYCLES: int = 1_000
@@ -58,15 +59,22 @@ def long_commands() -> list[r.Command]:
 
 
 def run_scenario(
-    commands: Sequence[r.Command], timing: Mapping[str, LaneTiming] | None = None
+    commands: Sequence[r.Command],
+    timing: Mapping[str, LaneTiming] | None = None,
+    trims: Mapping[str, int] | None = None,
 ) -> tuple[Edge, ...]:
     """Push `commands` through Bus/CMD_PUSH into a fresh Device with the given lane `timing`,
     start it, run to the last timestamp and return the Scope trace. The FIFO is filled before RUN,
     so the list must fit. Edges come out in issue order (ideal timestamp, FIFO ties); with skew,
     actual_cycle can go backwards from one edge to the next across lanes.
+
+    trims: SKEW_TRIM value in cycles per lane ("AOM1"), written over the bus before any command,
+        e.g. the trims a calibration found. Lanes not listed keep the reset value 0.
     """
     device = Device(timing=timing)
     bus = Bus(device)
+    for lane, trim in (trims or {}).items():
+        bus.write32(r.addr(f"{lane}.SKEW_TRIM"), trim)
     for cmd in commands:
         for word in r.encode_command(cmd):
             bus.write32(r.addr("FIFO.CMD_PUSH"), word)
@@ -118,3 +126,14 @@ SCENARIOS: dict[str, Scenario] = {
     )
 }
 """Every scenario by name, in the order of the plan table."""
+
+
+def calibrate_scenario(name: str) -> CalibrationResult:
+    """Run M6 calibration on a fresh Device with scenario `name`'s hidden lane faults.
+
+    Only the scenario's timing is used, not its commands: calibration sends its own edges. This is
+    the test bench side: it owns the device and hands the driver a bus, the scope and a way to let
+    time pass (device.run_until). Raises KeyError for an unknown name.
+    """
+    device = Device(timing=SCENARIOS[name].timing)
+    return calibrate(Bus(device), device.scope, device.run_until)
