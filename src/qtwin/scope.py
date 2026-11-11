@@ -55,3 +55,43 @@ class Scope:
     def edges(self) -> tuple[Edge, ...]:
         """Every edge so far. A tuple copy, so readers can't alter the trace."""
         return tuple(self._edges)
+
+
+# --- Measurement helpers: pure functions over a trace, integer cycles only. ---
+
+
+def offset_vs_time(edges: tuple[Edge, ...], lane: str) -> list[tuple[int, int]]:
+    """(ideal_cycle, offset) for every edge on `lane` (e.g. "AOM1"), in trace order. Cycles.
+
+    Constant offset means static skew; an offset that grows with ideal_cycle means drift.
+    """
+    return [(edge.ideal_cycle, edge.offset) for edge in edges if component(edge.channel) == lane]
+
+
+def channel_offsets(edges: tuple[Edge, ...]) -> dict[str, int]:
+    """Offset in cycles of the first recorded edge on each lane that has edges.
+
+    The earliest edge, not an average: drift has had the least time to add to it, so it is the
+    closest single reading of the static skew (the same idea as M6's calibration edge).
+    """
+    offsets: dict[str, int] = {}
+    for edge in edges:
+        offsets.setdefault(component(edge.channel), edge.offset)
+    return offsets
+
+
+def edge_delay(edges: tuple[Edge, ...], src: str, dst: str) -> list[int]:
+    """For each edge on lane `src`, cycles until the first `dst` edge at or after it.
+
+    Uses actual cycles: this measures what the outputs physically did (e.g. click -> AOM response).
+    A `src` edge with no later `dst` edge is skipped, so the list can be shorter than src's edges.
+    """
+    dst_times = [edge.actual_cycle for edge in edges if component(edge.channel) == dst]
+    delays: list[int] = []
+    for edge in edges:
+        if component(edge.channel) != src:
+            continue
+        later = [t for t in dst_times if t >= edge.actual_cycle]
+        if later:
+            delays.append(min(later) - edge.actual_cycle)
+    return delays
