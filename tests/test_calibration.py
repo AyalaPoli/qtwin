@@ -107,3 +107,15 @@ def test_run_scenario_with_trims_aligns_every_lane_to_the_slowest() -> None:
     edges = run_scenario(s.commands, s.timing, trims=trims)
     # Positive-only trim: every lane lands max_skew (3) late, none early, all together.
     assert {e.offset for e in edges} == {3}
+
+
+def test_calibrating_twice_gives_the_same_trims() -> None:
+    # Idempotent: the second run must measure raw skew, not skew + the first run's trims.
+    device = Device(timing=SCENARIOS["skew_some"].timing)
+    bus = Bus(device)
+    first = calibrate(bus, device.scope, device.run_until, span_cycles=SPAN)
+    second = calibrate(bus, device.scope, device.run_until, span_cycles=SPAN)
+    assert {lane: c.trim_cycles for lane, c in second.lanes.items()} == {
+        lane: c.trim_cycles for lane, c in first.lanes.items()
+    }
+    assert all(c.residual_cycles == 0 for c in second.lanes.values())

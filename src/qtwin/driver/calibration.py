@@ -3,7 +3,8 @@
 The driver sees the device only through Bus.read32/write32 and the read-only Scope trace, the way
 a real host sees an FPGA box through its registers plus a lab oscilloscope. Sequence:
 
-1. One calibration edge on all 8 output lanes at the same cycle T1. skew_i = arrival_i - T1.
+1. Clear every SKEW_TRIM to 0, then one calibration edge on all 8 output lanes at the same cycle
+   T1. skew_i = arrival_i - T1. Clearing first makes calibration idempotent.
 2. Write SKEW_TRIM_i = max_skew - skew_i. Trims can only delay, so every lane is aligned to the
    slowest one, not to T1.
 3. A verify edge at T1 + lead: residual_i = offset_i - max_skew must be 0 (closed loop).
@@ -79,7 +80,9 @@ def calibrate(
     span_cycles: int = 1_000_000,
     drift_threshold_ppb: int = DRIFT_THRESHOLD_PPB,
 ) -> CalibrationResult:
-    """Calibrate every output lane; leaves the device running with the trims written.
+    """Calibrate every output lane; leaves the device running with the new trims written.
+
+    Safe to repeat: old trims are cleared first, so a second run finds the same trims.
 
     wait_until(cycle): lets device time pass up to absolute `cycle`. The driver can't advance the
         device clock itself, so the caller supplies it, like a host sleeping until a time.
@@ -92,6 +95,10 @@ def calibrate(
         raise ValueError(f"need 0 < lead_cycles < span_cycles, got {lead_cycles}, {span_cycles}")
     ctrl = addr("SYSTEM.CTRL")
     bus.write32(ctrl, bus.read32(ctrl) | CTRL_RUN)
+    # Clear old trims first, so the T1 edge reads the raw skew. Otherwise a second calibration
+    # would see skew + previous trim (all lanes equal) and undo the first one.
+    for lane in OUTPUT_LANES:
+        bus.write32(addr(f"{lane}.SKEW_TRIM"), 0)
 
     t1 = _now(bus) + lead_cycles
     skew = _measure(bus, scope, wait_until, t1)

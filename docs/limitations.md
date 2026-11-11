@@ -73,5 +73,9 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
 - **Drift is detected, not compensated.** Trims fix only skew; a drifting lane goes out of alignment
   again. Continuous compensation is a next step.
 - **SNSPD lanes are not calibrated** (inputs, no SKEW_TRIM) until M7.
-- **Calibration assumes a fresh, otherwise idle device:** its edges share the FIFO and the Scope with
-  anything else queued.
+- **Calibration is repeatable, but assumes an idle device.** It clears every SKEW_TRIM first, so a
+  second run finds the same trims. Its edges still share the FIFO and the Scope with anything else
+  queued, so nothing else should be running.
+- **A late re-run reads drift as skew.** On a drifting lane, a calibration started at a large cycle
+  count measures skew + the drift accumulated since reset (e.g. +50 ppm at cycle 10^6 adds 50 cycles).
+  Calibrate soon after reset, or treat a drifting lane's skew as unreliable.
