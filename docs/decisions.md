@@ -130,7 +130,8 @@
   `FIFO.DROPPED`; `Device.fifo_levels/status_events`; `driver/base.py` (`stream`, `margin_cycles`,
   `read_cycle`); `Scenario.bus/stream`, `run() -> RunResult`; scenarios `bus_jitter`, `underrun`,
   `overflow`; plots `fifo_level.png`, `bus_jitter.png`.
-- **In-order delivery** (confirmed: real buses keep transaction order): `arrival = max(issue + latency + jitter, previous arrival)`. Jitter
+- **In-order delivery** (confirmed: real buses keep transaction order):
+  `arrival = max(issue + latency + jitter, previous arrival)`. Jitter
   delays a write but never lets it overtake, like AXI writes with one ID. Without this a jittered
   CMD_PUSH word could land in the wrong frame slot. The rule lives in the device's bus port
   (`schedule_write`), because the port owns the queue and reset clears it.
