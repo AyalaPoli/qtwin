@@ -9,7 +9,7 @@ Two kinds of access:
 from qtwin.device.clock import Clock
 from qtwin.device.registers import (
     BY_ADDRESS,
-    BY_NAME,
+    CTRL_RESET,
     REG_MASK,
     REGISTERS,
     Access,
@@ -18,6 +18,10 @@ from qtwin.device.registers import (
     addr,
 )
 
+_CTRL = addr("SYSTEM.CTRL")
+_STATUS = addr("SYSTEM.STATUS")
+_IRQ_STATUS = addr("SYSTEM.IRQ_STATUS")
+_IRQ_ENABLE = addr("SYSTEM.IRQ_ENABLE")
 _CYCLE_LO = addr("CLOCK.CYCLE_LO")
 _CYCLE_HI = addr("CLOCK.CYCLE_HI")
 
@@ -28,7 +32,24 @@ class Device:
     def __init__(self) -> None:
         self.clock = Clock()
         # Current value of every register, keyed by absolute byte address.
-        self._values: dict[int, int] = {reg.address: reg.reset for reg in REGISTERS}
+        self._values: dict[int, int] = {}
+        self.reset()
+
+    def reset(self) -> None:
+        """Return every register (incl. the CYCLE_HI shadow) to its reset value; zero the clock.
+
+        Same effect as power-on or the host writing CTRL.RESET.
+        """
+        self.clock.reset()
+        self._values = {reg.address: reg.reset for reg in REGISTERS}
+
+    @property
+    def irq_line(self) -> bool:
+        """Level of the interrupt wire to the host: high while any enabled event is pending.
+
+        Computed, not stored, so it can never disagree with IRQ_STATUS and IRQ_ENABLE.
+        """
+        return (self._values[_IRQ_STATUS] & self._values[_IRQ_ENABLE]) != 0
 
     # --- Bus side ---
 
@@ -58,7 +79,11 @@ class Device:
         reg = self._decode(address)
         if reg.access is Access.RO:
             raise BusError(f"{reg.name} is read-only")
-        if reg.access is Access.RW:
+        if address == _CTRL and value & CTRL_RESET:
+            # Self-clearing: the reset restores CTRL to 0, so RESET reads back 0 and any RUN bit
+            # in the same write is discarded. The device always comes out of reset stopped.
+            self.reset()
+        elif reg.access is Access.RW:
             self._values[address] = value
         elif reg.access is Access.W1C:
             # Clearing with a mask means the host can't accidentally clear a bit the device set
@@ -75,8 +100,8 @@ class Device:
 
         The bits are sticky: they stay set until the host clears them with a W1C write.
         """
-        for name in ("SYSTEM.STATUS", "SYSTEM.IRQ_STATUS"):
-            self._values[BY_NAME[name].address] |= mask
+        self._values[_STATUS] |= mask
+        self._values[_IRQ_STATUS] |= mask
 
     # --- Internals ---
 
