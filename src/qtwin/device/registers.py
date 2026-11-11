@@ -161,3 +161,56 @@ BY_ADDRESS: dict[int, Register] = {reg.address: reg for reg in REGISTERS}
 def addr(name: str) -> int:
     """Absolute byte address of register `name` ("BLOCK.REG"). Raises KeyError if unknown."""
     return BY_NAME[name].address
+
+
+# --- Timed commands (the CMD_PUSH frame format) ---
+# Defined here, not in device/, because the frame format is part of the register interface: the
+# driver must build frames, and it may import this module but never qtwin.device.
+
+TIMESTAMP_MAX: int = 2**64 - 1
+"""Largest command timestamp, in cycles (same width as the 64-bit cycle counter)."""
+
+CMD_WORDS: int = 4
+"""32-bit CMD_PUSH writes per command, in the order TS_LO, TS_HI, TARGET, VALUE. [assumed]"""
+
+OUTPUT_TARGETS: frozenset[int] = frozenset(
+    addr(f"AOM{i}.{field}") for i in range(4) for field in ("FREQ_WORD", "AMPL", "PHASE", "ENABLE")
+) | frozenset(addr(f"GPIO{i}.LEVEL") for i in range(4))
+"""Addresses a command may target: the registers that drive physical outputs.
+
+SKEW_TRIM is excluded on purpose: it configures a channel, it is not a timed output change.
+"""
+
+
+@dataclass(frozen=True)
+class Command:
+    """Set register `target` to `value` at exactly cycle `timestamp_cycles`.
+
+    timestamp_cycles: absolute device cycle (4 ns each), 0..2^64-1.
+    target: absolute byte address of the output register (one of OUTPUT_TARGETS; the device
+        checks this when the command is committed, so a bad target fails like any bad bus access).
+    value: new 32-bit register value.
+    """
+
+    timestamp_cycles: int
+    target: int
+    value: int
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.timestamp_cycles <= TIMESTAMP_MAX:
+            raise ValueError(f"timestamp_cycles must fit in 64 bits, got {self.timestamp_cycles}")
+        if not 0 <= self.target <= REG_MASK:
+            raise ValueError(f"target must fit in 32 bits, got {self.target:#x}")
+        if not 0 <= self.value <= REG_MASK:
+            raise ValueError(f"value must fit in 32 bits, got {self.value}")
+
+
+def encode_command(cmd: Command) -> tuple[int, int, int, int]:
+    """Split a command into the CMD_WORDS words the host writes to CMD_PUSH, in order."""
+    return (cmd.timestamp_cycles & REG_MASK, cmd.timestamp_cycles >> 32, cmd.target, cmd.value)
+
+
+def decode_command(words: tuple[int, int, int, int]) -> Command:
+    """Inverse of encode_command: rebuild the command from its CMD_WORDS words."""
+    ts_lo, ts_hi, target, value = words
+    return Command(timestamp_cycles=(ts_hi << 32) | ts_lo, target=target, value=value)
