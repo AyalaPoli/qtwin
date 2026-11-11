@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 
 from qtwin.analysis.plots import (
+    bus_jitter_plot,
     cli,
+    fifo_level_plot,
     main,
     offset_axis_limits,
     offset_bars,
@@ -13,7 +15,7 @@ from qtwin.analysis.plots import (
     offset_vs_time_plot,
     timing_diagram,
 )
-from qtwin.scenarios import SCENARIOS, ideal_commands, run_scenario
+from qtwin.scenarios import SCENARIOS, ideal_commands, run, run_scenario
 from qtwin.scope import Edge, channel_offsets
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -64,13 +66,37 @@ def test_plot_creates_missing_parent_directory(tmp_path: Path) -> None:
     assert_png(out)
 
 
+BASE_PLOTS = ["offset_bars.png", "offset_vs_time.png", "timing.png"]
+# M5 adds the FIFO-level plot where the FIFO is the story, and the jitter histogram where a
+# host streams over the bus. The M3/M4 test expected exactly three files for every scenario.
+EXTRA_PLOTS = {
+    "bus_jitter": ["bus_jitter.png", "fifo_level.png"],
+    "underrun": ["bus_jitter.png", "fifo_level.png"],
+    "overflow": ["fifo_level.png"],
+}
+
+
 @pytest.mark.parametrize("name", SCENARIOS)
-def test_main_writes_three_plots_per_scenario(tmp_path: Path, name: str) -> None:
+def test_main_writes_the_plots_of_each_scenario(tmp_path: Path, name: str) -> None:
     paths = main(name, tmp_path)
-    assert sorted(p.name for p in paths) == ["offset_bars.png", "offset_vs_time.png", "timing.png"]
+    assert sorted(p.name for p in paths) == sorted(BASE_PLOTS + EXTRA_PLOTS.get(name, []))
     for path in paths:
         assert path.parent == tmp_path / name
         assert_png(path)
+
+
+def test_fifo_level_plot_writes_a_png(tmp_path: Path) -> None:
+    result = run(SCENARIOS["underrun"])
+    assert_png(fifo_level_plot(result.fifo_levels, result.status_events, tmp_path / "f.png"))
+
+
+def test_fifo_level_plot_handles_an_empty_trace(tmp_path: Path) -> None:
+    assert_png(fifo_level_plot((), (), tmp_path / "f.png"))
+
+
+def test_bus_jitter_plot_writes_a_png(tmp_path: Path) -> None:
+    writes = run(SCENARIOS["bus_jitter"]).bus_writes
+    assert_png(bus_jitter_plot(writes, lead_cycles=60, path=tmp_path / "j.png"))
 
 
 def test_cli_defaults_to_ideal(tmp_path: Path) -> None:

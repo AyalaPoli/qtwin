@@ -3,7 +3,8 @@
 Each function takes edges and an output path and returns the path. They use Figure objects with
 an explicit Agg canvas instead of pyplot, so there is no global figure state and no GUI backend.
 Run `python -m qtwin.analysis.plots --scenario NAME` (default ideal) to write one scenario's plots
-to out/NAME/. Add `--calibrate` to put an "after calibration" series (M6 trims) in the offset bars.
+to out/NAME/; M5 bus scenarios also get fifo_level.png and bus_jitter.png. Add `--calibrate` to
+put an "after calibration" series (M6 trims) in the offset bars.
 """
 
 import argparse
@@ -16,6 +17,8 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
 from qtwin.analysis.stats import linear_fit
+from qtwin.bus import BusWrite
+from qtwin.device.registers import CMD_WORDS, FIFO_CAPACITY, STATUS_OVERFLOW, STATUS_UNDERRUN
 from qtwin.scenarios import SCENARIOS, calibrate_scenario, run
 from qtwin.scope import LANES, Edge, channel_offsets, component, offset_vs_time
 
@@ -26,6 +29,9 @@ IDEAL_COLOR = "#b4b2a9"  # light gray: what was commanded (reference, so recessi
 TEXT_MUTED = "#6b6a64"
 GRID_COLOR = "#e6e4dd"
 SERIES_COLORS = (ACTUAL_COLOR, SECOND_COLOR)
+# Reserved status colours (never series colours), always paired with a text label.
+UNDERRUN_COLOR = "#d03b3b"  # critical: the outputs missed their time
+OVERFLOW_COLOR = "#ec835a"  # serious: commands were lost
 
 
 def _new_figure(width: float, height: float) -> Figure:
@@ -171,6 +177,84 @@ def offset_vs_time_plot(edges: tuple[Edge, ...], path: Path) -> Path:
     return _save(fig, path)
 
 
+def fifo_level_plot(
+    fifo_levels: Sequence[tuple[int, int]],
+    status_events: Sequence[tuple[int, int]],
+    path: Path,
+) -> Path:
+    """FIFO level (commands) vs device cycle as a step line, with a dashed line at CAPACITY and
+    a vertical marker at every UNDERRUN / OVERFLOW event.
+
+    fifo_levels, status_events: Device.fifo_levels and Device.status_events, (cycle, value).
+    A step, not a sloped line: the level jumps at a push or pop and holds in between.
+    """
+    fig = _new_figure(9, 3.2)
+    ax = fig.subplots()
+    _style(ax)
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    if fifo_levels:
+        # Start from (first cycle, 0) so the first push shows as a rise from empty.
+        xs = [fifo_levels[0][0], *(c for c, _ in fifo_levels)]
+        ys = [0, *(level for _, level in fifo_levels)]
+        ax.step(xs, ys, where="post", color=ACTUAL_COLOR, linewidth=2)
+    else:
+        ax.text(0.5, 0.5, "no FIFO activity", ha="center", transform=ax.transAxes)
+    top = max((level for _, level in fifo_levels), default=0)
+    # Scale to the data so a level of 3 is readable; draw the capacity line only when the data
+    # comes near it (otherwise it would squash the trace into the bottom few pixels).
+    if top > FIFO_CAPACITY // 2:
+        ax.axhline(FIFO_CAPACITY, color=IDEAL_COLOR, linewidth=1, linestyle="--")
+        ax.text(1, FIFO_CAPACITY, f"capacity {FIFO_CAPACITY} ", color=TEXT_MUTED, fontsize=8,
+                ha="right", va="bottom", transform=ax.get_yaxis_transform())  # fmt: skip
+        ax.set_ylim(0, FIFO_CAPACITY * 1.15)
+    else:
+        ax.set_ylim(0, top + 2)
+    for mask, name, color in (
+        (STATUS_UNDERRUN, "UNDERRUN", UNDERRUN_COLOR),
+        (STATUS_OVERFLOW, "OVERFLOW", OVERFLOW_COLOR),
+    ):
+        cycles = [c for c, m in status_events if m & mask]
+        for cycle in sorted(set(cycles)):
+            ax.axvline(cycle, color=color, linewidth=1.5)
+        if cycles:
+            # Label once, by the first event: the line colour alone must not carry the meaning.
+            # The count is events, not distinct cycles (6 drops can share cycle 0).
+            ax.text(cycles[0], 0.98, f" {name} x{len(cycles)}", color=TEXT_MUTED, fontsize=8,
+                    va="top", transform=ax.get_xaxis_transform())  # fmt: skip
+    ax.set_xlabel("device cycle (4 ns each)", color=TEXT_MUTED, fontsize=9)
+    ax.set_ylabel("FIFO level (commands)", color=TEXT_MUTED, fontsize=9)
+    ax.set_title("FIFO level vs time", loc="left")
+    return _save(fig, path)
+
+
+def bus_jitter_plot(bus_writes: Sequence[BusWrite], lead_cycles: int, path: Path) -> Path:
+    """Histogram of bus delay per write (arrival - issue, in cycles), one bar per whole cycle.
+
+    The dashed line is lead_cycles - CMD_WORDS: the largest latency + jitter with margin >= 0.
+    Delays left of it cost nothing at the outputs; the FIFO lead absorbs them.
+    """
+    delays = [w.arrival_cycle - w.issue_cycle for w in bus_writes]
+    fig = _new_figure(7, 3.2)
+    ax = fig.subplots()
+    _style(ax)
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    if delays:
+        # Bins centred on whole cycles; rwidth leaves a gap between neighbouring bars.
+        bins = [d - 0.5 for d in range(min(delays), max(delays) + 2)]
+        ax.hist(delays, bins=bins, rwidth=0.85, color=ACTUAL_COLOR)
+    else:
+        ax.text(0.5, 0.5, "no bus writes", ha="center", transform=ax.transAxes)
+    budget = lead_cycles - CMD_WORDS
+    ax.axvline(budget, color=TEXT_MUTED, linewidth=1, linestyle="--")
+    ax.text(budget, 0.95, f" margin 0 ({budget} cycles)", color=TEXT_MUTED, fontsize=8,
+            va="top", transform=ax.get_xaxis_transform())  # fmt: skip
+    ax.set_xlabel("bus delay: arrival - issue (cycles)", color=TEXT_MUTED, fontsize=9)
+    ax.set_ylabel("writes", color=TEXT_MUTED, fontsize=9)
+    ax.set_title(f"Bus delay per write ({len(delays)} writes)", loc="left")
+    return _save(fig, path)
+
+
 def offset_series(scenario: str, calibrate: bool) -> dict[str, tuple[Edge, ...]]:
     """Traces for the offset bar chart: {"measured": ...} and, if `calibrate`, also
     {"after calibration": ...}, the same commands rerun with the trims M6 calibration found.
@@ -189,7 +273,7 @@ def offset_series(scenario: str, calibrate: bool) -> dict[str, tuple[Edge, ...]]
 def main(
     scenario: str = "ideal", out_dir: Path = Path("out"), calibrate: bool = False
 ) -> list[Path]:
-    """Run `scenario` and write its three plots to out_dir/<scenario>/ (created if missing).
+    """Run `scenario` and write its plots to out_dir/<scenario>/ (created if missing).
 
     calibrate: also show offsets after M6 calibration in offset_bars.png.
     Raises KeyError for an unknown scenario name.
@@ -197,11 +281,23 @@ def main(
     series = offset_series(scenario, calibrate)
     edges = series["measured"]
     folder = out_dir / scenario
-    return [
+    paths = [
         timing_diagram(edges, folder / "timing.png"),
         offset_bars(series, folder / "offset_bars.png"),
         offset_vs_time_plot(edges, folder / "offset_vs_time.png"),
     ]
+    # M5 plots, only where they have something to show: a streaming host, or dropped commands.
+    s = SCENARIOS[scenario]
+    result = run(s)
+    if s.stream is not None or result.dropped > 0:
+        paths.append(
+            fifo_level_plot(result.fifo_levels, result.status_events, folder / "fifo_level.png")
+        )
+    if s.stream is not None:
+        paths.append(
+            bus_jitter_plot(result.bus_writes, s.stream.lead_cycles, folder / "bus_jitter.png")
+        )
+    return paths
 
 
 def cli(argv: Sequence[str] | None = None) -> list[Path]:
