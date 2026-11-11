@@ -7,13 +7,16 @@ The M5 bus scenarios stream their commands through a slow, jittery bus while the
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from qtwin.bus import Bus, BusWrite
 from qtwin.device import registers as r
 from qtwin.device.device import Device, LaneTiming
+from qtwin.device.snspd import seeded_clicks
 from qtwin.driver.base import stream
 from qtwin.driver.calibration import CalibrationResult, calibrate
+from qtwin.driver.interrupt import Feedback, InterruptDriver
+from qtwin.driver.polling import PollingDriver
 from qtwin.scope import Edge
 
 PULSE_START_CYCLES: int = 1_000
@@ -260,3 +263,145 @@ def calibrate_scenario(name: str) -> CalibrationResult:
     """
     device = Device(timing=SCENARIOS[name].timing)
     return calibrate(Bus(device), device.scope, device.run_until)
+
+
+# --- M7: polling vs interrupt drivers ---
+
+
+@dataclass(frozen=True)
+class ClickConfig:
+    """snspd.seeded_clicks arguments for SNSPD0: seed, start, count, gap bounds (cycles)."""
+
+    seed: int
+    start: int
+    count: int
+    min_gap: int
+    max_gap: int
+
+    def clicks(self) -> tuple[int, ...]:
+        """The click cycles this config produces (absolute cycles)."""
+        return seeded_clicks(self.seed, self.start, self.count, self.min_gap, self.max_gap)
+
+
+@dataclass(frozen=True)
+class DriverScenario:
+    """One experiment that either driver can run. All times in cycles (4 ns).
+
+    commands: the stream to keep the FIFO fed with, in timestamp order (may be empty).
+    clicks: SNSPD0 click model, or None for no clicks.
+    until_cycle: the drivers serve the device up to this absolute cycle.
+    poll_period_cycles: the polling driver's period.
+    irq_latency_cycles, low_watermark, feedback: the interrupt driver's settings.
+    """
+
+    name: str
+    description: str
+    commands: tuple[r.Command, ...]
+    clicks: ClickConfig | None
+    until_cycle: int
+    bus: BusConfig
+    poll_period_cycles: int
+    irq_latency_cycles: int
+    low_watermark: int = r.FIFO_LOW_WATERMARK_RESET
+    feedback: Feedback | None = None
+
+
+@dataclass(frozen=True)
+class DriverResult:
+    """What one driver run produced. Cycles are absolute device cycles (4 ns).
+
+    edges: Scope trace, including SNSPD click edges. status: SYSTEM.STATUS at the end.
+    bus_reads: reads the driver made (its CPU cost; the final STATUS read is not counted).
+    latencies: per click, cycles from the click to the host knowing about it.
+    irq_events: Device instrumentation, (cycle, mask) for every IRQ_STATUS raise.
+    pushed: commands the driver wrote to CMD_PUSH.
+    """
+
+    edges: tuple[Edge, ...]
+    status: int
+    bus_reads: int
+    latencies: tuple[int, ...]
+    irq_events: tuple[tuple[int, int], ...]
+    pushed: int
+
+
+def run_driver(name: str, kind: str, click_seed: int | None = None) -> DriverResult:
+    """Run DRIVER_SCENARIOS[name] with the "polling" or "interrupt" driver on a fresh Device.
+
+    This is the test bench: it owns the device and hands the driver the bus plus run_until (and
+    run_until_irq for interrupts). click_seed replaces the scenario's click seed.
+    Raises KeyError for an unknown name, ValueError for an unknown kind.
+    """
+    s = DRIVER_SCENARIOS[name]
+    config = s.clicks
+    if config is not None and click_seed is not None:
+        config = replace(config, seed=click_seed)
+    clicks = config.clicks() if config is not None else ()
+    device = Device(clicks={"SNSPD0": clicks})
+    bus = Bus(device, s.bus.bus_latency_cycles, s.bus.max_jitter_cycles, s.bus.seed)
+    driver: PollingDriver | InterruptDriver
+    if kind == "polling":
+        driver = PollingDriver(bus, device.run_until, s.poll_period_cycles)
+    elif kind == "interrupt":
+        driver = InterruptDriver(
+            bus,
+            device.run_until,
+            device.run_until_irq,
+            s.irq_latency_cycles,
+            s.low_watermark,
+            s.feedback,
+        )
+    else:
+        raise ValueError(f"kind must be 'polling' or 'interrupt', got {kind!r}")
+    log = driver.run(s.commands, s.until_cycle)
+    reads = bus.read_count
+    # Let every queued command and in-flight write finish before taking the trace.
+    # (Feedback commands are due before until_cycle, which the scenarios leave room for.)
+    end = max(
+        [device.clock.now, s.until_cycle]
+        + [w.arrival_cycle for w in bus.writes]
+        + [c.timestamp_cycles for c in s.commands]
+    )
+    device.run_until(end)
+    return DriverResult(
+        edges=device.scope.edges,
+        status=bus.read32(r.addr("SYSTEM.STATUS")),
+        bus_reads=reads,
+        latencies=tuple(d - c for d, c in zip(log.detections, clicks, strict=True)),
+        irq_events=device.irq_events,
+        pushed=log.pushed,
+    )
+
+
+_SPARSE_CLICKS = ClickConfig(seed=2, start=5_000, count=20, min_gap=20_000, max_gap=60_000)
+
+DRIVER_SCENARIOS: dict[str, DriverScenario] = {
+    s.name: s
+    for s in (
+        DriverScenario(
+            "refill",
+            "400 commands, one per 50 cycles: polling every 5_000 underruns (64 * 50 = 3_200), "
+            "FIFO_LOW at watermark 16 keeps up (min_watermark = 6)",
+            tuple(_round_robin(400, STREAM_START_CYCLES, 50)),
+            clicks=None,
+            until_cycle=STREAM_START_CYCLES + 50 * 399,
+            bus=BusConfig(bus_latency_cycles=20),
+            poll_period_cycles=5_000,
+            irq_latency_cycles=200,
+        ),
+        DriverScenario(
+            "sparse_clicks",
+            "20 SNSPD0 clicks 20_000-60_000 cycles apart; poll every 1_000; interrupt feedback "
+            "toggles AOM0 400 cycles after each click",
+            (),
+            clicks=_SPARSE_CLICKS,
+            until_cycle=max(_SPARSE_CLICKS.clicks()) + 2_000,
+            bus=BusConfig(bus_latency_cycles=20),
+            poll_period_cycles=1_000,
+            irq_latency_cycles=200,
+            feedback=Feedback(feedback_latency_cycles=400, decide_cycles=20),
+        ),
+    )
+}
+"""M7 scenarios by name [assumed numbers]. Separate from SCENARIOS: they need a driver, not a
+command list pushed by the bench, and they have no golden trace (determinism is tested instead)."""
