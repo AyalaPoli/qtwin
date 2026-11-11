@@ -13,6 +13,8 @@ __pycache__/
 .idea/
 # Machine-specific local PyCharm MCP endpoint (port changes per machine/session)
 .mcp.json
+# Claude Code local settings and session state
+.claude/
 
 # Build and generated output
 build/
