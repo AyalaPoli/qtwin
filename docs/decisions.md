@@ -218,7 +218,9 @@
   COUNT wraps [assumed]; Scope edge `SNSPDn.COUNT`, no input skew [assumed].
 - **The ISR acks first, waits L + J for the posted write to land, then reads COUNT/LAST_TS.** Added
   after planning: reading before the ack lands can clear a newer click's bit. It adds L + J to both
-  formulas below (the plan had 3L and no flush).
+  formulas below (the plan had 3L and no flush). A real driver would instead flush the posted
+  write with a read-back (read IRQ_STATUS after the ack: on an in-order bus the read cannot pass
+  the write). The model waits L + J because its reads do not wait for writes in flight.
 - **Feedback budget:** `feedback_latency_cycles >= irq_latency + L (IRQ_STATUS) + (L + J) (ack flush)
   + 2L (COUNT, LAST_TS) + decide_cycles + (CMD_WORDS - 1) + L + J`, checked in
   `InterruptDriver.__init__`. The decision is `AOM0.ENABLE = COUNT % 2` [assumed].
