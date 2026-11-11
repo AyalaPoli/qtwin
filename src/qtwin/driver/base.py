@@ -1,4 +1,5 @@
-"""Driver building blocks shared by every host driver: read the clock, stream commands.
+"""Driver building blocks shared by every host driver: read the clock, push and stream commands,
+unwrap 32-bit timestamps.
 
 Like all driver code, this sees the device only through Bus.read32/write32. Time passes through
 the `wait_until` callback the test bench hands in (see calibration.py), never by touching the
@@ -19,7 +20,7 @@ time, so margin >= -1 guarantees an on-time command; margin >= 0 leaves one spar
 from collections.abc import Callable, Sequence
 
 from qtwin.bus import Bus
-from qtwin.device.registers import CMD_WORDS, Command, addr, encode_command
+from qtwin.device.registers import CMD_WORDS, REG_MASK, Command, addr, encode_command
 
 _CMD_PUSH = addr("FIFO.CMD_PUSH")
 
@@ -68,8 +69,31 @@ def stream(
         # The host can't act in the past: an early command it is already late for goes out now.
         # read_cycle samples at its CYCLE_LO read; the CYCLE_HI read costs one more bus latency.
         start = max(start, read_cycle(bus) + bus.bus_latency_cycles)
-        for k, word in enumerate(encode_command(cmd)):
-            wait_until(start + k)
-            bus.write32(_CMD_PUSH, word)
+        push_frame(bus, wait_until, cmd, start)
         starts.append(start)
     return tuple(starts)
+
+
+def push_frame(bus: Bus, wait_until: Callable[[int], None], cmd: Command, start: int) -> None:
+    """Write `cmd` to CMD_PUSH: word k at absolute cycle start + k, one bus write per cycle.
+
+    start: first write cycle; must not be in the past (wait_until raises if it is).
+    """
+    for k, word in enumerate(encode_command(cmd)):
+        wait_until(start + k)
+        bus.write32(_CMD_PUSH, word)
+
+
+def unwrap_ts(last_ts: int, t_ref: int) -> int:
+    """Full 64-bit cycle of a click from its 32-bit LAST_TS and a 64-bit time t_ref at or after it.
+
+    LAST_TS keeps the low 32 bits of the click cycle, so it wraps every 2^32 cycles (17.18 s).
+    The click is the latest cycle <= t_ref with those low bits: correct while the click is less
+    than 2^32 cycles before t_ref. An ISR reading LAST_TS microseconds after the IRQ is far inside
+    that window. last_ts: 0..2^32-1. t_ref: absolute cycles.
+    """
+    if not 0 <= last_ts <= REG_MASK:
+        raise ValueError(f"last_ts must fit in 32 bits, got {last_ts}")
+    # Python's % is never negative, so this also works when t_ref's low bits have wrapped past
+    # last_ts (e.g. click at 2^32 - 5, t_ref at 2^32 + 10): the distance comes out as 15.
+    return t_ref - ((t_ref & REG_MASK) - last_ts) % (REG_MASK + 1)
