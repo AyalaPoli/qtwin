@@ -1,5 +1,9 @@
 """Hard rule 3: driver code sees the device only through the bus, never by importing qtwin.device.
 
+One exception: the register map (qtwin.device.registers). CLAUDE.md lets the driver import it, the
+same way a real driver includes the chip's register header. It must stay pure data (stdlib imports
+only, checked in test_registers.py), so importing it gives the driver no path to device state.
+
 The check is static (ast), so it catches violations even in code paths no test executes.
 """
 
@@ -10,22 +14,31 @@ import pytest
 
 DRIVER_DIR = Path(__file__).resolve().parents[1] / "src" / "qtwin" / "driver"
 
+# Allowed only under this one absolute spelling. A single canonical form keeps the checker simple
+# and makes every use of the exception easy to find with grep.
+REGISTER_MAP_MODULE = "qtwin.device.registers"
+
+
+def _is_device_module(name: str) -> bool:
+    is_device = name == "qtwin.device" or name.startswith("qtwin.device.")
+    return is_device and name != REGISTER_MAP_MODULE
+
 
 def find_device_imports(source: str) -> list[str]:
-    """Return a description of every import of qtwin.device found in `source`."""
+    """Return a description of every forbidden import of qtwin.device found in `source`."""
     hits: list[str] = []
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             # import qtwin.device / import qtwin.device.fifo as f
             for alias in node.names:
-                if alias.name == "qtwin.device" or alias.name.startswith("qtwin.device."):
+                if _is_device_module(alias.name):
                     hits.append(f"line {node.lineno}: import {alias.name}")
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             imported = {alias.name for alias in node.names}
             if node.level == 0:
                 # from qtwin.device[.x] import y   /   from qtwin import device
-                if module == "qtwin.device" or module.startswith("qtwin.device."):
+                if _is_device_module(module):
                     hits.append(f"line {node.lineno}: from {module} import ...")
                 elif module == "qtwin" and "device" in imported:
                     hits.append(f"line {node.lineno}: from qtwin import device")
@@ -57,12 +70,15 @@ def test_driver_package_never_imports_device() -> None:
     [
         "import qtwin.device",
         "import qtwin.device.fifo as fifo",
+        # The register map is allowed only under its full module path (see REGISTER_MAP_MODULE).
         "from qtwin.device import registers",
         "from qtwin.device.sequencer import Sequencer",
+        "from qtwin.device.registers_extra import x",  # name only starts with 'registers'
         "from qtwin import device",
         "from qtwin import bus, device",
         "from ..device import fifo",
         "from ..device.clock import Clock",
+        "from ..device.registers import REGISTERS",  # only the absolute spelling is allowed
         "from .. import device",
     ],
 )
@@ -80,6 +96,9 @@ def test_checker_catches_device_imports(bad_source: str) -> None:
         "from .device import helper",  # a hypothetical driver/device.py, not qtwin.device
         "from .. import scope",
         "import qtwin.scope",
+        "from qtwin.device.registers import REGISTERS",
+        "import qtwin.device.registers",
+        "import qtwin.device.registers as regs",
     ],
 )
 def test_checker_allows_other_imports(allowed_source: str) -> None:
