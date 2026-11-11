@@ -30,7 +30,7 @@ src/qtwin/
   bus.py           read32/write32 with latency and seeded jitter          (M5)
   driver/          base, polling, interrupt, calibration                  (M6, M7)
   scope.py         virtual oscilloscope / logic analyzer                  (M2, M3)
-  scenarios.py     Scenario dataclass + registry                          (M4)
+  scenarios.py     Scenario dataclass + registry, injected skew/drift      (M4)
   analysis/        stats and matplotlib plots (PNGs to out/)              (M3)
 cpp/ringbuffer/    lock-free SPSC ring buffer + benchmark                 (M8)
 tests/  tests/golden/  docs/  out/

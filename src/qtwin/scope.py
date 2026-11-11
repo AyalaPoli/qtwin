@@ -42,7 +42,11 @@ class Edge:
 
 
 class Scope:
-    """Append-only trace of output edges, in the order they happened."""
+    """Append-only trace of output edges, in the order the sequencer issued them.
+
+    Issue order is ideal timestamp with FIFO order for ties. With per-lane skew, actual_cycle can go
+    backwards from one edge to the next across lanes; within one lane it never does.
+    """
 
     def __init__(self) -> None:
         self._edges: list[Edge] = []

@@ -27,3 +27,10 @@
 3. A constant offset over time is static skew (calibrate once); an offset that grows with time is drift (needs tracking). Plotting offset vs time with a fitted line tells them apart: intercept = skew, slope = drift.
 4. Measurements stay integer cycles; floats appear only in the analysis fit, never in scheduling, so analysis can never change behaviour.
 5. A golden trace freezes the expected output of a known scenario. Any change in timing becomes a failing test and a reviewable diff, and regenerating it is a deliberate act.
+
+## M4: Static skew vs drift (fault injection)
+1. Skew is a fixed delay on one output path (cable, buffer, delay line): every edge on that lane lands the same number of cycles late, so it can be measured once and calibrated away.
+2. Drift is a small frequency error (parts per billion): the offset grows with elapsed time, as a staircase of whole-cycle slips (+50 ppm = one cycle every 20 000 cycles), so a one-time calibration goes stale and must be tracked.
+3. The sequencer still acts at the commanded cycle; the delay lives after the register, in the output path. Scheduling and output timing are separate, as in hardware.
+4. Hardware delay lines can only add delay, so channels are aligned to the slowest one (SKEW_TRIM = max_skew - skew), never by moving an edge earlier.
+5. Faults are injected on purpose, with exact known values, so a test can check that a measurement recovers what was put in. Hand-computed edges check correctness; golden traces only detect change.

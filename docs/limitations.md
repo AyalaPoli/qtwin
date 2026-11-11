@@ -27,8 +27,9 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
 - **Applying a command takes 0 cycles**, and any number of commands can run on the same cycle.
   Real sequencers have a pipeline depth and a limited number of outputs changed per cycle.
 - **Every applied write is a Scope edge**, including a write of the value already present.
-- **Ideal outputs:** no skew or drift yet (M4). On-time edges land at exactly the commanded cycle;
-  only a late command has actual > ideal.
+- **Output timing is a per-lane formula** (M4): actual = issue cycle + skew + SKEW_TRIM +
+  drift_offset(issue cycle, drift_ppb). In the `ideal` scenario on-time edges land exactly on the
+  commanded cycle.
 - **Time moves only through `Device.run_until`**, called by tests. There is no free-running simulation loop.
 
 ## Scope and plots
@@ -42,6 +43,19 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
 - **The drift fit is plain least squares** on a staircase of whole-cycle slips, so the fitted ppb is
   approximate (a hand-made 50 000 ppb trace fitted to ~49 300 ppb). Floats are used only there.
 
-## Drift
+## Skew and drift (M4)
 - Drift is integer parts-per-billion, truncated toward zero, so it appears as whole-cycle slips.
   It is detected and reported, not continuously compensated.
+- **Drift is a formula per edge, not a second clock.** Each lane has no oscillator of its own; its
+  error is computed from the device cycle count when an edge is issued. There is no phase noise and
+  no jitter on edges: every fault is exact and repeatable.
+- **Skew and drift are constant for a run.** Real skew changes with temperature, drift with ageing.
+- **Skew is positive only** (a delay line can't advance an edge). Fault values are invented
+  ([assumed] for `mixed`, which reuses the skew_some and drift_some values).
+- **Changing SKEW_TRIM mid-run** affects only edges issued afterwards, and lowering it could put a
+  later edge of a lane before an earlier one. The model does not prevent that.
+- **Edges can be recorded "in the future".** The edge is logged when issued, with actual_cycle
+  ahead of the device clock by the lane delay. The trace stays in issue order, not actual order.
+- **SNSPD skew is stored but has no effect** until M7: detectors have no edges and no SKEW_TRIM.
+- **The timing diagram can't show small offsets over long runs**: over 10^6 cycles, a 50-cycle
+  offset is below one pixel. Use offset_vs_time. A zoomed window is a possible next step.

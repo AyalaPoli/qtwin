@@ -97,3 +97,25 @@
 - **Lanes with no edges are labelled "no edges"** in the offset bar chart (confirmed). Zero offsets
   were first drawn as no bar at all; commit bb78775 added a "0" label on every lane that has edges,
   because an invisible zero bar looked the same as a lane with no edges.
+
+## M4: Skew and drift scenarios
+- **What:** `drift_offset` in `device/clock.py`; `LaneTiming(skew_cycles, drift_ppb)` and the output
+  delay in `device/device.py`; `Scenario` + `SCENARIOS` + `long_commands()` in `scenarios.py`; one
+  golden per scenario; `python -m qtwin.analysis.plots --scenario NAME [--out DIR]` writes to out/NAME/.
+- **Faults live in the device, not in registers.** `Device(timing=...)` is the hidden truth; the
+  driver can only measure its effect on the Scope (M6). Unknown lane names raise.
+- **Skew is positive only** (`LaneTiming` raises on < 0); drift may be + or -.
+- **Delay after the register:** the register takes the value at the issue cycle; only the Scope edge
+  is shifted. SKEW_TRIM is read from the register at issue time (reset 0), so M6 only writes it.
+- **Drift is evaluated at the issue cycle** (the device clock when the sequencer applies the command).
+  For on-time commands that equals the ideal timestamp, as planned; for a late command it is the
+  later cycle, because the output path drifts with real elapsed time [assumed].
+- **Trace in issue order**, not sorted by actual_cycle; a test shows skew_some reorders across lanes.
+- **`ideal` keeps M3's 24-command list**, so `tests/golden/ideal.json` is byte-identical. Fault
+  scenarios use `long_commands()` (56 commands, markers at 250k..1M cycles; fits the 64-entry FIFO).
+- **`mixed` reuses** skew_some's AOM1/GPIO2 skew and drift_some's drift [assumed].
+- **SNSPD0 +2 in skew_some is stored but inert** until M7 [assumed].
+- **No seed in M4**: there is no random source, so determinism is tested as two identical runs.
+  Seeds arrive with bus jitter (M5).
+- **Plots output moved** from out/*.png to out/<scenario>/*.png; the old main test was replaced
+  because the interface changed.
