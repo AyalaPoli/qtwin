@@ -105,6 +105,10 @@ class Device:
         self._dropped = 0
         # Bus writes in flight: (arrival cycle, address, value), arrival order = issue order.
         self._pending: deque[tuple[int, int, int]] = deque()
+        # Instrumentation for plots and tests, not registers: the driver can't see these. Like
+        # the Scope they survive reset, so a run's whole history stays in one place.
+        self._fifo_levels: list[tuple[int, int]] = []
+        self._status_events: list[tuple[int, int]] = []
         self.reset()
 
     def reset(self) -> None:
@@ -129,6 +133,19 @@ class Device:
         Computed, not stored, so it can never disagree with IRQ_STATUS and IRQ_ENABLE.
         """
         return (self._values[_IRQ_STATUS] & self._values[_IRQ_ENABLE]) != 0
+
+    @property
+    def fifo_levels(self) -> tuple[tuple[int, int], ...]:
+        """(cycle, level in commands after the change) for every FIFO push and pop, in order.
+
+        A reset empties the FIFO without an entry (not needed by any scenario) [assumed].
+        """
+        return tuple(self._fifo_levels)
+
+    @property
+    def status_events(self) -> tuple[tuple[int, int], ...]:
+        """(cycle, mask) for every set_status call, in order: when each error flag was raised."""
+        return tuple(self._status_events)
 
     @property
     def fifo_level(self) -> int:
@@ -219,6 +236,7 @@ class Device:
         """
         self._values[_STATUS] |= mask
         self._values[_IRQ_STATUS] |= mask
+        self._status_events.append((self.clock.now, mask))
 
     def push_command(self, cmd: Command) -> None:
         """Queue a command, skipping CMD_PUSH framing (tests); a completed bus frame ends here too.
@@ -238,7 +256,9 @@ class Device:
             # that empties after the last command never triggers this, since nothing arrives late.
             # A late command behind others is head-of-line blocking: LATE only, not UNDERRUN.
             self.set_status(STATUS_UNDERRUN)
-        if not self._fifo.push(cmd):
+        if self._fifo.push(cmd):
+            self._fifo_levels.append((self.clock.now, len(self._fifo)))
+        else:
             # Tail drop: the commands already queued were accepted first and keep their slots.
             # Saturate instead of wrapping, so a huge count can never read back as a small one.
             self._dropped = min(self._dropped + 1, REG_MASK)
@@ -291,6 +311,7 @@ class Device:
         # Called by the sequencer with the clock already at the execution cycle. For a late
         # command that is after its timestamp, and the Scope keeps both so the miss is measurable.
         # The register changes now; the output path delay is added on top for the Scope edge.
+        self._fifo_levels.append((self.clock.now, len(self._fifo)))  # the sequencer just popped
         self._values[cmd.target] = cmd.value
         channel = BY_ADDRESS[cmd.target].name
         self.scope.record(

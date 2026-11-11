@@ -225,6 +225,31 @@ def test_underrun_over_a_slow_bus_is_flagged_on_the_arrival_cycle(device: Device
     assert bus.read32(STATUS) & ERRORS == r.STATUS_UNDERRUN | r.STATUS_LATE
 
 
+# --- Instrumentation (M5): FIFO level and status events over time, for plots and tests ---
+
+
+def test_fifo_levels_record_every_change_with_its_cycle(device: Device, bus: Bus) -> None:
+    for ts in (100, 200, 300):
+        device.push_command(Command(ts, GPIO0, 1))
+    start(bus)
+    device.run_until(1_000)
+    assert device.fifo_levels == ((0, 1), (0, 2), (0, 3), (100, 2), (200, 1), (300, 0))
+
+
+def test_a_dropped_command_does_not_change_the_level_trace(device: Device) -> None:
+    fill(device)
+    before = device.fifo_levels
+    device.push_command(Command(999, GPIO0, 1))
+    assert device.fifo_levels == before
+
+
+def test_status_events_record_each_flag_at_its_exact_cycle(device: Device, bus: Bus) -> None:
+    running_at(device, bus, 500)
+    device.push_command(Command(400, GPIO0, 1))
+    device.run_until(600)
+    assert device.status_events == ((500, r.STATUS_UNDERRUN), (500, r.STATUS_LATE))
+
+
 # --- Execution ---
 
 
