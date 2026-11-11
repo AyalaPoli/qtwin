@@ -4,7 +4,8 @@ Each function takes edges and an output path and returns the path. They use Figu
 an explicit Agg canvas instead of pyplot, so there is no global figure state and no GUI backend.
 Run `python -m qtwin.analysis.plots --scenario NAME` (default ideal) to write one scenario's plots
 to out/NAME/; M5 bus scenarios also get fifo_level.png and bus_jitter.png. Add `--calibrate` to
-put an "after calibration" series (M6 trims) in the offset bars.
+put an "after calibration" series (M6 trims) in the offset bars. `--drivers` writes the M7
+polling vs interrupt latency histograms to out/drivers/ instead.
 """
 
 import argparse
@@ -16,10 +17,10 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
-from qtwin.analysis.stats import linear_fit
+from qtwin.analysis.stats import linear_fit, percentile
 from qtwin.bus import BusWrite
 from qtwin.device.registers import CMD_WORDS, FIFO_CAPACITY, STATUS_OVERFLOW, STATUS_UNDERRUN
-from qtwin.scenarios import SCENARIOS, calibrate_scenario, run
+from qtwin.scenarios import SCENARIOS, calibrate_scenario, run, run_driver
 from qtwin.scope import LANES, Edge, channel_offsets, component, offset_vs_time
 
 # Colors from a validated colorblind-safe categorical palette (slots 1 and 2), plus neutrals.
@@ -255,6 +256,71 @@ def bus_jitter_plot(bus_writes: Sequence[BusWrite], lead_cycles: int, path: Path
     return _save(fig, path)
 
 
+def latency_histograms(
+    polling: Sequence[int], interrupt: Sequence[int], path: Path, bins: int = 40
+) -> Path:
+    """Detection latency histograms, polling above interrupt, sharing one x axis in cycles (bottom)
+    and ns (top, x4). Each panel marks p50, p99 and max (nearest-rank) with labelled lines.
+
+    polling, interrupt: per-click latency in cycles (click -> host knows), e.g. from run_driver.
+    bins: number of equal bins over 0..largest latency.
+    A shared axis, not two autoscaled ones, so the spread of polling and the single spike of
+    interrupts are compared on the same scale.
+    """
+    top = max([*polling, *interrupt, 1])
+    # Whole-cycle bin width, edges offset by half a bin so each value sits inside its bar, not on
+    # an edge (a constant latency then shows as one bar centred on its marker line).
+    width = -(-top // bins)
+    edges = [width * k - width / 2 for k in range(bins + 2)]
+    fig = _new_figure(8, 4.6)
+    axes = fig.subplots(2, 1, sharex=True)
+    panels = (("Polling", polling, ACTUAL_COLOR), ("Interrupt", interrupt, SECOND_COLOR))
+    for ax, (name, values, color) in zip(axes, panels, strict=True):
+        _style(ax)
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.set_ylabel("clicks", color=TEXT_MUTED, fontsize=9)
+        if not values:
+            ax.set_title(f"{name}: no clicks", loc="left", fontsize=10)
+            ax.text(0.5, 0.5, "no data", ha="center", transform=ax.transAxes, color=TEXT_MUTED)
+            continue
+        counts, _, _ = ax.hist(values, bins=edges, rwidth=0.85, color=color)
+        # Headroom above the tallest bar keeps the marker labels off the bars.
+        ax.set_ylim(0, max(counts) * 1.5)
+        # One line per distinct value: when p99 equals max (few samples, or a constant latency)
+        # the labels merge instead of printing on top of each other.
+        marks: dict[int, list[str]] = {}
+        for label, value in (
+            ("p50", percentile(values, 50)),
+            ("p99", percentile(values, 99)),
+            ("max", max(values)),
+        ):
+            marks.setdefault(value, []).append(label)
+        for row, (value, labels) in enumerate(sorted(marks.items())):
+            ax.axvline(value, color=TEXT_MUTED, linewidth=1, linestyle="--")
+            # Labels in the right quarter go left of their line, so they never leave the plot.
+            right = value > 0.75 * top
+            text = f"{' = '.join(labels)} {value}"
+            ax.text(value, 0.95 - 0.14 * row, f"{text} " if right else f" {text}",
+                    ha="right" if right else "left", color=TEXT_MUTED, fontsize=8, va="top",
+                    transform=ax.get_xaxis_transform())  # fmt: skip
+        ax.set_title(f"{name}: {len(values)} clicks", loc="left", fontsize=10)
+    axes[1].set_xlabel("detection latency (cycles)", color=TEXT_MUTED, fontsize=9)
+    ns = axes[0].secondary_xaxis("top", functions=(lambda c: c * 4, lambda n: n / 4))
+    ns.set_xlabel("latency (ns)", color=TEXT_MUTED, fontsize=9)
+    ns.tick_params(colors=TEXT_MUTED, labelsize=8)
+    ns.spines["top"].set_color(GRID_COLOR)
+    axes[1].set_xlim(0, top * 1.05)
+    fig.suptitle("Click -> host detection latency", x=0.02, ha="left")
+    return _save(fig, path)
+
+
+def driver_plots(out_dir: Path = Path("out")) -> list[Path]:
+    """M7: run sparse_clicks with both drivers and write out_dir/drivers/latency_histograms.png."""
+    polling = run_driver("sparse_clicks", "polling").latencies
+    interrupt = run_driver("sparse_clicks", "interrupt").latencies
+    return [latency_histograms(polling, interrupt, out_dir / "drivers" / "latency_histograms.png")]
+
+
 def offset_series(scenario: str, calibrate: bool) -> dict[str, tuple[Edge, ...]]:
     """Traces for the offset bar chart: {"measured": ...} and, if `calibrate`, also
     {"after calibration": ...}, the same commands rerun with the trims M6 calibration found.
@@ -311,7 +377,12 @@ def cli(argv: Sequence[str] | None = None) -> list[Path]:
     parser.add_argument(
         "--calibrate", action="store_true", help='add an "after calibration" offset series'
     )
+    parser.add_argument(
+        "--drivers", action="store_true", help="M7 polling vs interrupt latency histograms only"
+    )
     args = parser.parse_args(argv)
+    if args.drivers:
+        return driver_plots(args.out)
     return main(args.scenario, args.out, args.calibrate)
 
 

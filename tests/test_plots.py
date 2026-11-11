@@ -8,6 +8,7 @@ from qtwin.analysis.plots import (
     bus_jitter_plot,
     cli,
     fifo_level_plot,
+    latency_histograms,
     main,
     offset_axis_limits,
     offset_bars,
@@ -138,3 +139,21 @@ def test_offset_series_adds_after_calibration() -> None:
 def test_cli_calibrate_writes_plots(tmp_path: Path) -> None:
     paths = cli(["--scenario", "one_both", "--calibrate", "--out", str(tmp_path)])
     assert all(p.exists() for p in paths)
+
+
+# --- M7: latency histograms, polling vs interrupt ---
+
+
+def test_latency_histograms_write_a_png(tmp_path: Path) -> None:
+    path = latency_histograms([1, 500, 968, 12], [220, 220, 220], tmp_path / "lat.png")
+    assert_png(path)
+
+
+def test_latency_histograms_handle_empty_series(tmp_path: Path) -> None:
+    assert_png(latency_histograms([], [], tmp_path / "lat.png"))
+
+
+def test_cli_drivers_writes_the_latency_plot(tmp_path: Path) -> None:
+    paths = cli(["--drivers", "--out", str(tmp_path)])
+    assert paths == [tmp_path / "drivers" / "latency_histograms.png"]
+    assert_png(paths[0])

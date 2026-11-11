@@ -2,7 +2,7 @@
 
 import pytest
 
-from qtwin.analysis.stats import linear_fit
+from qtwin.analysis.stats import linear_fit, percentile
 
 
 def test_fit_recovers_an_exact_line() -> None:
@@ -32,3 +32,28 @@ def test_fit_needs_two_distinct_x_values() -> None:
 def test_fit_needs_equal_lengths() -> None:
     with pytest.raises(ValueError):
         linear_fit([0, 1, 2], [0, 1])
+
+
+# --- percentile (M7): nearest-rank, integer result ---
+
+
+@pytest.mark.parametrize(
+    ("p", "expected"), [(50, 5), (99, 10), (100, 10), (10, 1), (1, 1), (55, 6)]
+)
+def test_percentile_nearest_rank(p: int, expected: int) -> None:
+    assert percentile([7, 1, 3, 2, 10, 5, 4, 9, 6, 8], p) == expected
+
+
+def test_percentile_of_one_value() -> None:
+    assert percentile([220], 99) == 220
+
+
+@pytest.mark.parametrize("p", [0, 101])
+def test_percentile_rejects_p_outside_1_to_100(p: int) -> None:
+    with pytest.raises(ValueError):
+        percentile([1, 2], p)
+
+
+def test_percentile_of_nothing_raises() -> None:
+    with pytest.raises(ValueError):
+        percentile([], 50)
