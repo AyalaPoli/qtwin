@@ -120,9 +120,11 @@
 - **Plots output moved** from out/*.png to out/<scenario>/*.png; the old main test was replaced
   because the interface changed.
 
-## M5: Bus model (skipped for now)
-- **Skipped, not dropped** (confirmed). The bus stays instant (0 cycles, no jitter) through M6.
-  Bus latency, jitter, FIFO drop + OVERFLOW and their seeds are still planned for M5.
+## M5: Bus model (done after M6, before M7)
+- **Skipped, not dropped** (confirmed). The bus stayed instant (0 cycles, no jitter) through M6.
+- **Now done before M7** (confirmed 2026-11-11): M7's polling and interrupt drivers need bus cost,
+  underrun and FIFO-level data, so M5 must come first. Bus defaults stay ideal (0 latency, 0 jitter),
+  so M4 goldens and M6 calibration are unchanged.
 
 ## M6: Driver calibration
 - **What:** `driver/calibration.py`: `calibrate(bus, scope, wait_until)` -> `CalibrationResult` of per-lane
