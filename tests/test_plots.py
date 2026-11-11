@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from qtwin.analysis.plots import main, offset_bars, offset_vs_time_plot, timing_diagram
+from qtwin.analysis.plots import (
+    main,
+    offset_axis_limits,
+    offset_bars,
+    offset_vs_time_plot,
+    timing_diagram,
+)
 from qtwin.scenarios import ideal_commands, run_scenario
 from qtwin.scope import Edge
 
@@ -62,3 +68,14 @@ def test_main_writes_the_three_ideal_plots(tmp_path: Path) -> None:
     for path in paths:
         assert path.parent == tmp_path
         assert_png(path)
+
+
+def test_offset_axis_spans_at_least_one_cycle_each_way() -> None:
+    # All-zero offsets must not autoscale to +-0.05, which shows fractional ticks.
+    assert offset_axis_limits([0, 0, 0]) == (-1, 1)
+    assert offset_axis_limits([]) == (-1, 1)
+
+
+def test_offset_axis_covers_the_data_with_one_cycle_headroom() -> None:
+    assert offset_axis_limits([0, 3, 1]) == (-1, 4)
+    assert offset_axis_limits([-2, 0]) == (-3, 1)

@@ -5,7 +5,7 @@ an explicit Agg canvas instead of pyplot, so there is no global figure state and
 Run `python -m qtwin.analysis.plots` to write the ideal scenario's plots to out/.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from matplotlib.axes import Axes
@@ -41,6 +41,14 @@ def _style(ax: Axes) -> None:
     ax.tick_params(colors=TEXT_MUTED, labelsize=8)
     ax.grid(True, color=GRID_COLOR, linewidth=0.8)
     ax.set_axisbelow(True)
+
+
+def offset_axis_limits(offsets: Sequence[int]) -> tuple[int, int]:
+    """Y limits for an offset axis, in cycles: the data plus 1 cycle of headroom, always
+    including 0. Without this, all-zero data autoscales to +-0.05 and shows fractional ticks
+    on an axis that can only hold whole cycles.
+    """
+    return min([0, *offsets]) - 1, max([0, *offsets]) + 1
 
 
 def _save(fig: Figure, path: Path) -> Path:
@@ -89,18 +97,27 @@ def offset_bars(series: Mapping[str, tuple[Edge, ...]], path: Path) -> Path:
     _style(ax)
     width = 0.8 / len(series)
     used: set[str] = set()
+    all_heights: list[int] = []
     for k, (label, edges) in enumerate(series.items()):
         offsets = channel_offsets(edges)
         used |= offsets.keys()
         xs = [i + (k - (len(series) - 1) / 2) * width for i, lane in enumerate(LANES)]
         heights = [offsets.get(lane, 0) for lane in LANES]
+        all_heights += heights
         bars = ax.bar(xs, heights, width * 0.9, color=SERIES_COLORS[k], label=label)
-        # Label only nonzero bars: zeros are the expected case and would just add noise.
-        ax.bar_label(bars, [str(h) if h else "" for h in heights], fontsize=8, color=TEXT_MUTED)
+        # Label every lane that has edges: a 0-height bar is invisible, so without its "0" a
+        # measured zero offset would look the same as a lane with no edges.
+        ax.bar_label(
+            bars,
+            [str(h) if lane in offsets else "" for h, lane in zip(heights, LANES, strict=True)],
+            fontsize=8,
+            color=TEXT_MUTED,
+        )
     for i, lane in enumerate(LANES):
         if lane not in used:
             ax.text(i, 0, "no edges", ha="center", va="bottom", fontsize=7, color=TEXT_MUTED)
     ax.axhline(0, color=TEXT_MUTED, linewidth=0.8)
+    ax.set_ylim(*offset_axis_limits(all_heights))
     ax.set_xticks(range(len(LANES)), LANES)
     ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_ylabel("offset (cycles, 4 ns each)", color=TEXT_MUTED)
@@ -139,6 +156,8 @@ def offset_vs_time_plot(edges: tuple[Edge, ...], path: Path) -> Path:
         else:
             title = f"{lane}: too few points to fit"
         ax.set_title(title, loc="left", fontsize=9)
+    # Axes are shared, so setting the limits once applies to every panel.
+    axes[0].set_ylim(*offset_axis_limits([edge.offset for edge in edges]))
     for ax in axes[len(lanes) :]:
         ax.set_visible(False)
     if not lanes:
