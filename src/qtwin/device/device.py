@@ -6,14 +6,22 @@ Two kinds of access:
   test does to drive it. It bypasses the bus rules, the same way logic inside an FPGA drives a
   status bit directly.
 
+Output timing: the sequencer applies a command at its ideal timestamp, then each lane's output path
+adds a fixed skew, the SKEW_TRIM delay and accumulated drift before the edge appears, like a cable
+and a delay line after the register.
+
 Timed commands: the host writes CMD_WORDS words to FIFO.CMD_PUSH; the last word commits the command
 into the FIFO; the sequencer applies it at its timestamp and every output write goes to the Scope.
 """
 
-from qtwin.device.clock import Clock
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+from qtwin.device.clock import Clock, drift_offset
 from qtwin.device.fifo import CommandFifo
 from qtwin.device.registers import (
     BY_ADDRESS,
+    BY_NAME,
     CMD_WORDS,
     CTRL_RESET,
     CTRL_RUN,
@@ -30,7 +38,7 @@ from qtwin.device.registers import (
     decode_command,
 )
 from qtwin.device.sequencer import Sequencer
-from qtwin.scope import Scope
+from qtwin.scope import LANES, Scope, component
 
 _CTRL = addr("SYSTEM.CTRL")
 _STATUS = addr("SYSTEM.STATUS")
@@ -39,15 +47,44 @@ _IRQ_ENABLE = addr("SYSTEM.IRQ_ENABLE")
 _CYCLE_LO = addr("CLOCK.CYCLE_LO")
 _CYCLE_HI = addr("CLOCK.CYCLE_HI")
 _FIFO_LEVEL = addr("FIFO.LEVEL")
+# Lanes that have a SKEW_TRIM register (AOM and GPIO; SNSPD has none).
+_SKEW_TRIM = {
+    lane: BY_NAME[f"{lane}.SKEW_TRIM"].address for lane in LANES if f"{lane}.SKEW_TRIM" in BY_NAME
+}
+
+
+@dataclass(frozen=True)
+class LaneTiming:
+    """Timing faults of one lane's output path, fixed for a run.
+
+    skew_cycles: constant delay in cycles (4 ns each), >= 0. Positive only because a cable or delay
+        line can only delay: no output can change before it was commanded.
+    drift_ppb: frequency error of the lane's timing in parts per billion, + or - (50_000 = +50 ppm).
+    """
+
+    skew_cycles: int = 0
+    drift_ppb: int = 0
+
+    def __post_init__(self) -> None:
+        if self.skew_cycles < 0:
+            raise ValueError(f"skew_cycles must be >= 0, got {self.skew_cycles}")
 
 
 class Device:
     """Register-level model of the control box. Starts in its reset state.
 
     scope: where output edges are recorded; a fresh Scope if not given.
+    timing: injected faults per lane name ("AOM1"); lanes not listed are ideal. A fault scenario
+        sets this. It is not a register: the driver can't see it, only measure its effect.
     """
 
-    def __init__(self, scope: Scope | None = None) -> None:
+    def __init__(
+        self, scope: Scope | None = None, timing: Mapping[str, LaneTiming] | None = None
+    ) -> None:
+        unknown = set(timing or {}) - set(LANES)
+        if unknown:
+            raise ValueError(f"unknown lanes in timing: {sorted(unknown)}")
+        self._timing = dict(timing or {})
         self.clock = Clock()
         self.scope = scope if scope is not None else Scope()
         self._fifo = CommandFifo(FIFO_CAPACITY)
@@ -178,13 +215,23 @@ class Device:
     def _apply(self, cmd: Command) -> None:
         # Called by the sequencer with the clock already at the execution cycle. For a late
         # command that is after its timestamp, and the Scope keeps both so the miss is measurable.
+        # The register changes now; the output path delay is added on top for the Scope edge.
         self._values[cmd.target] = cmd.value
+        channel = BY_ADDRESS[cmd.target].name
         self.scope.record(
-            channel=BY_ADDRESS[cmd.target].name,
+            channel=channel,
             ideal_cycle=cmd.timestamp_cycles,
-            actual_cycle=self.clock.now,
+            actual_cycle=self.clock.now + self._output_delay(component(channel)),
             value=cmd.value,
         )
+
+    def _output_delay(self, lane: str) -> int:
+        # Cycles from the register change to the output edge. Drift is evaluated at the current
+        # cycle (cycles since reset): the longer the run, the more the lane's timing has slipped.
+        # Never negative: skew and trim are >= 0, and |drift| < now while |drift_ppb| < 10^9.
+        timing = self._timing.get(lane, LaneTiming())
+        trim = self._values[_SKEW_TRIM[lane]] if lane in _SKEW_TRIM else 0
+        return timing.skew_cycles + trim + drift_offset(self.clock.now, timing.drift_ppb)
 
     def _late(self) -> None:
         self.set_status(STATUS_LATE)
