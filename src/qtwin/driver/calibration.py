@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from qtwin.bus import Bus
 from qtwin.device.registers import CTRL_RUN, Command, addr, encode_command
+from qtwin.driver.base import read_cycle
 from qtwin.scope import Scope, offsets_at
 
 OUTPUT_LANES: tuple[str, ...] = (*(f"AOM{i}" for i in range(4)), *(f"GPIO{i}" for i in range(4)))
@@ -100,7 +101,7 @@ def calibrate(
     for lane in OUTPUT_LANES:
         bus.write32(addr(f"{lane}.SKEW_TRIM"), 0)
 
-    t1 = _now(bus) + lead_cycles
+    t1 = read_cycle(bus) + lead_cycles
     skew = _measure(bus, scope, wait_until, t1)
     max_skew = max(skew.values())
     trim = {lane: max_skew - s for lane, s in skew.items()}
@@ -126,13 +127,6 @@ def calibrate(
             flagged=abs(ppb) > drift_threshold_ppb,
         )
     return CalibrationResult(t1=t1, t2=t2, threshold_ppb=drift_threshold_ppb, lanes=lanes)
-
-
-def _now(bus: Bus) -> int:
-    # Reading CYCLE_LO latches the high half, so LO then HI is one consistent 64-bit value.
-    lo = bus.read32(addr("CLOCK.CYCLE_LO"))
-    hi = bus.read32(addr("CLOCK.CYCLE_HI"))
-    return (hi << 32) | lo
 
 
 def _measure(
