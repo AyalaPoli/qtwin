@@ -195,3 +195,43 @@
 - **Calibration is idempotent** (confirmed, replaces the "fresh device" assumption): `calibrate()`
   first writes SKEW_TRIM = 0 on all 8 lanes, so the T1 edge reads the raw skew. Without it a second
   run would read skew + old trim (equal on every lane) and write all trims back to 0.
+
+## M7: Polling vs interrupt driver, SNSPD feedback
+- **What:** read cost in `Bus.read32` plus `read_count`; FIFO_LOW and `Device.irq_events`;
+  `Device.run_until_irq`; `device/snspd.py` (`seeded_clicks`, clicks as a third event source);
+  `driver/base.py` (`push_frame`, `unwrap_ts`, `start_stream`, `DriverLog`); `driver/polling.py`;
+  `driver/interrupt.py` (`Feedback`, `min_feedback_latency`, `min_watermark`); `DRIVER_SCENARIOS` +
+  `run_driver`; `latency_histograms` (`python -m qtwin.analysis.plots --drivers`).
+- **Read cost:** a read runs the device for `bus_latency_cycles` and samples on arrival. One-way cost
+  and no read jitter [assumed]: adding reads never changes a seed's write-jitter sequence, and the 8
+  goldens stay byte-identical. With latency 0 a read doesn't touch time at all: `run_until(now)` would
+  run commands due this cycle, which changed an M2 test's result.
+- **`set_status` splits:** STATUS gets only bits 0-2 (`STATUS_MASK`), IRQ_STATUS gets every bit.
+  `status_events` stays error-only (the M5 tests that pin it are unchanged); `irq_events` records all.
+- **FIFO_LOW = edge on the crossing pop** (LEVEL goes from W to W - 1) [assumed]. Rejected: a level
+  (re-raising after every pop would run the ISR once per command).
+- **`wait_for_irq` is a callback**, like `wait_until`: the driver can't import the device.
+  `run_until_irq` steps from event to event (bus arrival, click, FIFO head), so it finds the exact
+  rising cycle without ticking.
+- **Click model:** uniform integer gaps from a private seeded generator [assumed]; clicks are a hidden
+  Device input like the lane faults. On one cycle the order is bus write, click, sequencer [assumed].
+  COUNT wraps [assumed]; Scope edge `SNSPDn.COUNT`, no input skew [assumed].
+- **The ISR acks first, waits L + J for the posted write to land, then reads COUNT/LAST_TS.** Added
+  after planning: reading before the ack lands can clear a newer click's bit. It adds L + J to both
+  formulas below (the plan had 3L and no flush).
+- **Feedback budget:** `feedback_latency_cycles >= irq_latency + L (IRQ_STATUS) + (L + J) (ack flush)
+  + 2L (COUNT, LAST_TS) + decide_cycles + (CMD_WORDS - 1) + L + J`, checked in
+  `InterruptDriver.__init__`. The decision is `AOM0.ENABLE = COUNT % 2` [assumed].
+- **Watermark:** `LOW_WATERMARK >= ceil((irq_latency + 3L + 2J + CMD_WORDS - 1) / cycles_per_command)`.
+  `min_watermark(200, 20, 0, 50) = 6`; a test shows 6 holds and 5 underruns.
+- **Polling order:** COUNT first (detection latency), then LEVEL, then refill `CAPACITY - LEVEL`. A
+  poll whose refill overruns the period delays the next one.
+- **Scenarios** [assumed numbers]: `refill` 400 commands every 50 cycles, L = 20, polling 5 000, IRQ
+  latency 200, watermark 16; `sparse_clicks` 20 clicks 20 000-60 000 apart (seed 2), polling 1 000,
+  IRQ latency 200, feedback 400, decide 20. Separate `DRIVER_SCENARIOS` registry and no goldens:
+  determinism is tested by running twice.
+- **Percentiles are nearest-rank integers** (`stats.percentile`): p50/p99 are always real latencies.
+- **Tests changed**, both because a bus read now takes time, not because the behaviour under test
+  changed: `test_bus.py::test_write_lands_exactly_bus_latency_cycles_later` and
+  `test_device_commands.py::test_underrun_over_a_slow_bus_is_flagged_on_the_arrival_cycle` check
+  device state at a precise cycle over a slow bus, and now use `device.read`, a device-side peek.

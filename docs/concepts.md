@@ -48,3 +48,10 @@
 3. Positive-only delay lines mean "aligned" is not "on time": every lane ends up as late as the slowest one, and they all land together.
 4. Two readings far apart separate the two faults: the early reading is the intercept (skew), the growth between them is the slope (drift). Measuring skew early keeps drift from leaking into it.
 5. Resolution is a limit of the measurement, not the math: the Scope sees whole cycles, so drift below one cycle per span (1 000 ppb over 10^6 cycles) reads as 0. A longer span finds smaller drift, at the cost of calibration time.
+
+## M7: Polling vs interrupts, and the measure -> decide -> act loop
+1. Polling asks "anything new?" on a fixed schedule; interrupts let the device say "something happened". Polling latency depends on luck (anywhere from 0 to one period + a read); interrupt latency is the same every time (IRQ latency + one read: 220 cycles here).
+2. Polling pays for every question, even when the answer is no: 1 699 reads for 20 sparse clicks, against 63 for interrupts. That bus/CPU time is what interrupts save; the price is a fixed reaction delay and an ISR that must be written carefully.
+3. A FIFO refill interrupt fires at the low watermark, and the watermark must hold enough commands to outlast the reaction: LOW_WATERMARK >= ceil((irq_latency + 3*bus_latency + 2*jitter + 3) / cycles_per_command). One command fewer and the stream starves (tested at 6 vs 5).
+4. Feedback closes the loop: click -> IRQ -> read -> decide -> timestamped AOM command. Because the action carries a timestamp (click + budget), it lands exactly on the budget whatever the jitter, as long as the budget covers the whole worst-case path.
+5. Order matters in an ISR: acknowledge the interrupt, wait until that posted write has landed, then read the data. Reading first can lose an event that arrives in between. LAST_TS is only 32 bits, so the host unwraps it against a nearby 64-bit time.

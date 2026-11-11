@@ -48,9 +48,9 @@ Every access also raises `BusError` for an unaligned or unmapped address. Writin
 | AOMn | 0x10 | SKEW_TRIM | RW | 0 | output delay, cycles (positive only) |
 | GPIOn | 0x00 | LEVEL | RW | 0 | |
 | GPIOn | 0x04 | SKEW_TRIM | RW | 0 | output delay, cycles (positive only) |
-| SNSPDn | 0x00 | COUNT | RO | 0 | detector clicks |
-| SNSPDn | 0x04 | THRESHOLD | RW | 0 | [assumed] reset 0 |
-| SNSPDn | 0x08 | LAST_TS | RO | 0 | low 32 bits of the cycle of the last click [assumed] |
+| SNSPDn | 0x00 | COUNT | RO | 0 | clicks since reset; wraps at 2^32 [assumed] (M7) |
+| SNSPDn | 0x04 | THRESHOLD | RW | 0 | [assumed] reset 0; stored but unused by the click model |
+| SNSPDn | 0x08 | LAST_TS | RO | 0 | low 32 bits of the cycle of the last click [assumed]; wraps every 2^32 cycles (17.18 s) |
 | FIFO | 0x00 | CMD_PUSH | WO | - | command write port, 4 words per command (see below) |
 | FIFO | 0x04 | LEVEL | RO | 0 | commands queued (computed from the FIFO) |
 | FIFO | 0x08 | CAPACITY | RO | 64 | commands [assumed] |
@@ -83,11 +83,12 @@ AOMn is at 0x100 + n * 0x100 (n = 0..3), GPIOn at 0x500 + n * 0x100, SNSPDn at 0
 | 0 | UNDERRUN | same event as STATUS.UNDERRUN |
 | 1 | OVERFLOW | same event as STATUS.OVERFLOW |
 | 2 | LATE | same event as STATUS.LATE |
-| 3 | FIFO_LOW | FIFO level dropped below LOW_WATERMARK (M7) |
-| 4 | SNSPD0 | detector 0 click (M7) |
-| 5 | SNSPD1 | detector 1 click (M7) |
+| 3 | FIFO_LOW | a sequencer pop took FIFO.LEVEL from LOW_WATERMARK to LOW_WATERMARK - 1 (M7). An edge: staying below does not raise it again; refilling above and draining again does [assumed] |
+| 4 | SNSPD0 | detector 0 click, on the click cycle (M7) |
+| 5 | SNSPD1 | detector 1 click, on the click cycle (M7) |
 
-An error event sets its bit in both STATUS and IRQ_STATUS. They are cleared separately: acknowledging
+An error event (bits 0-2) sets its bit in both STATUS and IRQ_STATUS. FIFO_LOW and SNSPD clicks
+are not errors: they set IRQ_STATUS only (STATUS keeps bits 0-2, `STATUS_MASK`). They are cleared separately: acknowledging
 the interrupt (IRQ_STATUS) and clearing the error flag (STATUS) are two different host actions.
 
 The IRQ line to the host is `(IRQ_STATUS & IRQ_ENABLE) != 0`. It is computed, not stored, so masking
@@ -130,3 +131,18 @@ absolute cycle `timestamp_cycles`. The host sends it as **4 writes to CMD_PUSH**
 - The FIFO is strictly in order. Commands run only while CTRL.RUN is set. A command whose timestamp
   has already passed when it reaches the head runs immediately and sets STATUS.LATE and IRQ_STATUS.LATE.
 - `encode_command` / `decode_command` in `registers.py` build and parse the 4 words.
+
+## Detector registers (SNSPDn, M7)
+
+On a click at cycle c: COUNT += 1 (mod 2^32), LAST_TS = c mod 2^32, IRQ_STATUS.SNSPDn is set.
+Clicks come from a hidden, seeded click list (`device/snspd.py`), counted whether or not RUN is set.
+
+**LAST_TS wrap.** LAST_TS holds only the low 32 bits, so it wraps every 2^32 cycles (17.18 s). The
+host rebuilds the full cycle from any 64-bit time t_ref at or after the click:
+`click = t_ref - ((t_ref mod 2^32) - LAST_TS) mod 2^32` (`driver.base.unwrap_ts`). This is exact while
+the click is less than 2^32 cycles before t_ref; at exactly 2^32 it is ambiguous. An ISR reads it
+microseconds after the IRQ, far inside that window.
+
+**Acknowledge, then read.** An ISR should W1C-clear the SNSPD bit, wait until that write has landed,
+then read COUNT and LAST_TS. A click after the clear raises the bit again; a click before it is in
+COUNT. Reading first and clearing later can clear the bit of a click the host never saw.

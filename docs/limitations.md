@@ -17,10 +17,10 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
   ignores such writes silently. The model raises so that driver bugs show up immediately in tests.
   The same strictness applies to unaligned/unmapped addresses, reads of the write-only CMD_PUSH,
   and values outside 32 bits.
-- **Bus timing is writes only** (M5). Writes land after `bus_latency_cycles` plus uniform 0..max
-  jitter; reads are instant and don't wait for writes still in flight, so a read right after a
-  write can return the old value. Read cost arrives with M7 polling. M6 calibration uses the
-  default instant bus.
+- **Bus timing** (M5, M7). Writes land after `bus_latency_cycles` plus uniform 0..max jitter.
+  A read blocks the host for `bus_latency_cycles` and samples the register on arrival; the
+  response path is free and reads have no jitter. A read does not wait for writes still in
+  flight, so it can miss a write that lands later. M6 calibration uses the default instant bus.
 - **Jitter is uniform and independent per write.** Real bus jitter is bursty and correlated
   (arbitration, refresh, other masters). No bandwidth limit: any number of writes can be in flight.
 - **One write per cycle is the streamer's rule, not the bus's.** The bus itself accepts any number
@@ -51,7 +51,7 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
 - **Per-channel offset is the earliest edge only.** It is one reading, not an average, so with drift
   it ignores how the offset changes later; `offset_vs_time` shows the full series.
 - **All fields of one AOM share one lane** (FREQ_WORD, AMPL, PHASE, ENABLE), as one physical output.
-- **SNSPD lanes are empty until M7**: the detectors have no output edges in the model yet.
+- **SNSPD edges are clicks** (M7): one edge per click on `SNSPDn.COUNT`, ideal = actual = click cycle.
 - **The drift fit is plain least squares** on a staircase of whole-cycle slips, so the fitted ppb is
   approximate (a hand-made 50 000 ppb trace fitted to ~49 300 ppb). Floats are used only there.
 
@@ -68,7 +68,7 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
   later edge of a lane before an earlier one. The model does not prevent that.
 - **Edges can be recorded "in the future".** The edge is logged when issued, with actual_cycle
   ahead of the device clock by the lane delay. The trace stays in issue order, not actual order.
-- **SNSPD skew is stored but has no effect** until M7: detectors have no edges and no SKEW_TRIM.
+- **SNSPD skew is stored but has no effect**, even in M7: a click is stamped on the cycle it happens.
 - **The timing diagram can't show small offsets over long runs**: over 10^6 cycles, a 50-cycle
   offset is below one pixel. Use offset_vs_time. A zoomed window is a possible next step.
 
@@ -82,10 +82,39 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
   It is 0 while T1 < 10^9 / ppb (33 333 cycles at 30 ppm); calibration uses T1 = 1 000.
 - **Drift is detected, not compensated.** Trims fix only skew; a drifting lane goes out of alignment
   again. Continuous compensation is a next step.
-- **SNSPD lanes are not calibrated** (inputs, no SKEW_TRIM) until M7.
+- **SNSPD lanes are not calibrated**: they are inputs with no SKEW_TRIM.
 - **Calibration is repeatable, but assumes an idle device.** It clears every SKEW_TRIM first, so a
   second run finds the same trims. Its edges still share the FIFO and the Scope with anything else
   queued, so nothing else should be running.
 - **A late re-run reads drift as skew.** On a drifting lane, a calibration started at a large cycle
   count measures skew + the drift accumulated since reset (e.g. +50 ppm at cycle 10^6 adds 50 cycles).
   Calibrate soon after reset, or treat a drifting lane's skew as unreliable.
+
+## Polling, interrupts and feedback (M7)
+- **Clicks are not photons.** Gaps between clicks are uniform integers from a seeded generator, not
+  Poisson arrivals. No dead time beyond "one click per cycle per detector", no dark counts, no
+  efficiency; THRESHOLD is stored but ignored. Clicks count while RUN is clear, and a reset does
+  not replay clicks already delivered.
+- **COUNT wraps at 2^32 and LAST_TS every 2^32 cycles (17.18 s).** Drivers use COUNT differences
+  modulo 2^32 and `unwrap_ts`; a click 2^32 cycles or more before the ISR reads LAST_TS is
+  misplaced by multiples of 2^32. Only the last click's timestamp is kept: when several clicks
+  arrive before the ISR, the earlier timestamps are lost (each detection uses the ISR's time).
+- **FIFO_LOW is an edge** on the pop that crosses below the watermark. A FIFO that never fills above
+  the watermark never interrupts, so the interrupt driver fills it before RUN.
+- **The host is one thread with no preemption.** The ISR runs to completion; an IRQ during the ISR
+  waits until it returns. Driver code takes 0 cycles except for bus accesses, frames (one word per
+  cycle), the IRQ latency and `decide_cycles`. A real CPU adds cache misses, scheduling and other
+  interrupts: real interrupt latency is not constant.
+- **irq_latency_cycles is one fixed number.** The IRQ line rises on the event cycle with no
+  synchronisation delay.
+- **The interrupt refill pushes CAPACITY - LOW_WATERMARK commands without reading LEVEL.** Safe
+  because LEVEL < watermark at the crossing; with a watermark of 0 it never fires.
+- **The polling refill trusts LEVEL**, which does not count frames still in flight. That is safe
+  only while the poll period is much longer than bus latency + jitter (true in every scenario).
+- **Feedback commands share the FIFO with the stream.** The FIFO is in order, so a feedback command
+  queued behind later-stamped stream commands would wait (head-of-line blocking) and go late. The
+  scenarios keep them apart: `refill` has no clicks, `sparse_clicks` has no stream.
+- **Polling feedback is not modelled.** Only the interrupt driver acts on clicks.
+- **Latency means "the host knows"**: when the read that showed the click returns, not when an
+  action happens. Action timing is measured separately on the Scope (`edge_delay`).
+- **20 clicks per run** make p99 equal to max. The histogram shows the shape, not a precise tail.
