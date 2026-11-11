@@ -1,6 +1,6 @@
 """Scope measurement helpers, checked on hand-built traces with known answers."""
 
-from qtwin.scope import Edge, channel_offsets, edge_delay, offset_vs_time
+from qtwin.scope import Edge, channel_offsets, edge_delay, offset_vs_time, offsets_at
 
 
 def e(channel: str, ideal: int, actual: int, value: int = 1) -> Edge:
@@ -75,3 +75,9 @@ def test_edge_delay_picks_the_first_dst_edge_at_or_after_each_src_edge() -> None
 def test_edge_delay_skips_a_src_edge_with_no_later_dst_edge() -> None:
     trace = (e("GPIO0.LEVEL", 10, 10), e("AOM0.ENABLE", 20, 20), e("GPIO0.LEVEL", 30, 30))
     assert edge_delay(trace, "GPIO0", "AOM0") == [10]
+
+
+def test_offsets_at_picks_one_ideal_cycle_per_lane() -> None:
+    assert offsets_at(SKEWED, 100) == {"GPIO0": 0, "GPIO2": 1, "AOM1": 3}
+    assert offsets_at(SKEWED, 500) == {"AOM1": 3, "GPIO2": 1}
+    assert offsets_at(SKEWED, 999) == {}

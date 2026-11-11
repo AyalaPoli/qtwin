@@ -84,6 +84,19 @@ def channel_offsets(edges: tuple[Edge, ...]) -> dict[str, int]:
     return offsets
 
 
+def offsets_at(edges: tuple[Edge, ...], ideal_cycle: int) -> dict[str, int]:
+    """Offset in cycles, per lane, of the edge commanded for exactly `ideal_cycle`.
+
+    For calibration: the driver puts one edge on every lane at the same cycle, then reads where
+    each one landed. A lane with no edge at that cycle is absent; with several, the first wins.
+    """
+    offsets: dict[str, int] = {}
+    for edge in edges:
+        if edge.ideal_cycle == ideal_cycle:
+            offsets.setdefault(component(edge.channel), edge.offset)
+    return offsets
+
+
 def edge_delay(edges: tuple[Edge, ...], src: str, dst: str) -> list[int]:
     """For each edge on lane `src`, cycles until the first `dst` edge at or after it.
 
