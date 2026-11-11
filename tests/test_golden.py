@@ -1,8 +1,9 @@
-"""Golden trace: the ideal scenario's Scope output, frozen in tests/golden/ideal.json.
+"""Golden traces: each scenario's Scope output, frozen in tests/golden/<name>.json.
 
 Any change to timing behaviour shows up here as a failure, then as a reviewable git diff.
+A golden file detects change, not correctness: test_fault_scenarios.py holds hand-computed edges.
 To regenerate on purpose (PowerShell):  $env:QTWIN_REGEN_GOLDEN=1; pytest tests/test_golden.py
-That rewrites the file and still fails, so a regeneration can never pass silently.
+That rewrites the files and still fails, so a regeneration can never pass silently.
 Then clear the variable (Remove-Item Env:QTWIN_REGEN_GOLDEN) and review `git diff tests/golden`.
 """
 
@@ -13,16 +14,19 @@ from pathlib import Path
 
 import pytest
 
-from qtwin.scenarios import ideal_commands, run_scenario
+from qtwin.scenarios import SCENARIOS, run_scenario
 
-GOLDEN = Path(__file__).parent / "golden" / "ideal.json"
+GOLDEN_DIR = Path(__file__).parent / "golden"
 
 
-def test_ideal_trace_matches_golden() -> None:
-    actual = [dataclasses.asdict(e) for e in run_scenario(ideal_commands())]
+@pytest.mark.parametrize("name", SCENARIOS)
+def test_trace_matches_golden(name: str) -> None:
+    scenario = SCENARIOS[name]
+    actual = [dataclasses.asdict(e) for e in run_scenario(scenario.commands, scenario.timing)]
+    golden = GOLDEN_DIR / f"{name}.json"
     if os.environ.get("QTWIN_REGEN_GOLDEN") == "1":
-        GOLDEN.parent.mkdir(exist_ok=True)
-        GOLDEN.write_text(json.dumps(actual, indent=1) + "\n", encoding="utf-8")
-        pytest.fail(f"regenerated {GOLDEN.name}; review the git diff, then rerun without the flag")
-    expected = json.loads(GOLDEN.read_text(encoding="utf-8"))
+        GOLDEN_DIR.mkdir(exist_ok=True)
+        golden.write_text(json.dumps(actual, indent=1) + "\n", encoding="utf-8")
+        pytest.fail(f"regenerated {golden.name}; review the git diff, then rerun without the flag")
+    expected = json.loads(golden.read_text(encoding="utf-8"))
     assert actual == expected
