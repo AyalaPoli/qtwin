@@ -1,4 +1,4 @@
-"""drift_offset: whole cycles of drift after n cycles, truncated toward zero. Values are hand-computed."""
+"""drift_offset: whole cycles of drift after n cycles, truncated toward zero (hand-computed)."""
 
 import pytest
 
