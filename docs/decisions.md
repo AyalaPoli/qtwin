@@ -130,24 +130,27 @@
   `FIFO.DROPPED`; `Device.fifo_levels/status_events`; `driver/base.py` (`stream`, `margin_cycles`,
   `read_cycle`); `Scenario.bus/stream`, `run() -> RunResult`; scenarios `bus_jitter`, `underrun`,
   `overflow`; plots `fifo_level.png`, `bus_jitter.png`.
-- **In-order delivery** [assumed]: `arrival = max(issue + latency + jitter, previous arrival)`. Jitter
+- **In-order delivery** (confirmed: real buses keep transaction order): `arrival = max(issue + latency + jitter, previous arrival)`. Jitter
   delays a write but never lets it overtake, like AXI writes with one ID. Without this a jittered
   CMD_PUSH word could land in the wrong frame slot. The rule lives in the device's bus port
   (`schedule_write`), because the port owns the queue and reset clears it.
-- **Bus arrivals before the sequencer on the same cycle** [assumed]. A frame landing on its own
+- **Bus arrivals before the sequencer on the same cycle** (confirmed). A frame landing on its own
   timestamp is on time, which matches M2's `ts < now` = late rule and keeps the 0-latency bus
   exactly the old instant bus.
 - **Bad accesses raise at issue**, not on arrival (`check_write`): the host hears about a bad address
   in its own call. A bad command target still fails on the 4th word's arrival, since only the full
   frame knows its target.
-- **Reset discards writes in flight** [assumed]: the bus port is device state like any other.
+- **Reset discards writes in flight** (confirmed): the bus port is device state like any other.
 - **Margin = lead - (latency + max jitter + CMD_WORDS)**, as planned. The exact boundary is -1 (a frame
   may land on its timestamp cycle); tests cover margins 6, 0 and -1 (identical) and -2, -24 (misses).
 - **Streamer timing:** word k goes out at start + k, one write per cycle; `start_i = max(ts_i - lead,
   start_{i-1} + host_gap_cycles, now)`. `host_gap_cycles` is how the underrun scenario makes the host
   slower than the sequencer. `stream` lives in `driver/base.py` so M7's drivers can reuse it.
   `read_cycle` moved there from calibration.
-- **Underrun definition** [assumed]: while RUN is set, a command committed into an **empty** FIFO after
+- **Scenario numbers** (confirmed): `bus_jitter` L=20, J=0..30, seed 1, lead 60 (margin 6), 40
+  commands 100 cycles apart from cycle 10_000; `underrun` L=10, J=0, lead 100, host_gap 40, 12
+  commands 20 cycles apart; `overflow` 70 commands prefilled into the 64-entry FIFO.
+- **Underrun definition** (confirmed): while RUN is set, a command committed into an **empty** FIFO after
   its timestamp. Flagged on the commit cycle, the first cycle the device can know. An empty FIFO after
   the last command never triggers it; a late command behind others is LATE only (head-of-line
   blocking); a stopped sequencer can't underrun. The M2 late-command test now also expects UNDERRUN,
