@@ -72,7 +72,7 @@ AOMn is at 0x100 + n * 0x100 (n = 0..3), GPIOn at 0x500 + n * 0x100, SNSPDn at 0
 
 | Bit | Name | Set when |
 |-----|------|----------|
-| 0 | UNDERRUN | FIFO ran empty while commands were still expected (M5) |
+| 0 | UNDERRUN | while RUN, a command was committed into an empty FIFO after its timestamp: the sequencer was starved (M5). Set on the commit cycle; the command then runs late and also sets LATE |
 | 1 | OVERFLOW | a command was committed into a full FIFO and dropped (M5) |
 | 2 | LATE | command timestamp already in the past when it reached the sequencer (M2) |
 

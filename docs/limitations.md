@@ -17,14 +17,24 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
   ignores such writes silently. The model raises so that driver bugs show up immediately in tests.
   The same strictness applies to unaligned/unmapped addresses, reads of the write-only CMD_PUSH,
   and values outside 32 bits.
-- **Instant bus.** `read32`/`write32` take 0 cycles. Bus latency and jitter are M5 (skipped for now),
-  so M6 calibration ignores bus timing.
+- **Bus timing is writes only** (M5). Writes land after `bus_latency_cycles` plus uniform 0..max
+  jitter; reads are instant and don't wait for writes still in flight, so a read right after a
+  write can return the old value. Read cost arrives with M7 polling. M6 calibration uses the
+  default instant bus.
+- **Jitter is uniform and independent per write.** Real bus jitter is bursty and correlated
+  (arbitration, refresh, other masters). No bandwidth limit: any number of writes can be in flight.
+- **One write per cycle is the streamer's rule, not the bus's.** The bus itself accepts any number
+  of writes per cycle.
 - **No counter wrap.** The 64-bit counter raises instead of wrapping at 2^64 (about 2,339 years at 250 MHz).
 - **Identification and sizes are invented:** ID, VERSION, FIFO CAPACITY (64), LOW_WATERMARK reset (16)
   and SNSPD THRESHOLD reset (0) are marked [assumed] in `docs/registers.md`.
 
 ## Commands and sequencer
-- **Full FIFO raises** `FifoFullError` (M2). Real hardware drops or blocks; M5 adds drop + STATUS.OVERFLOW.
+- **Full FIFO drops the new command** (M5), sets OVERFLOW and counts it in FIFO.DROPPED. No
+  back-pressure: the host learns about drops only by reading STATUS or DROPPED.
+- **UNDERRUN is detected on arrival**, when the late command commits into the empty FIFO, not at
+  the cycle the timestamp passed: the device can't know a command is missing until it arrives.
+  A command that never arrives is never reported.
 - **Applying a command takes 0 cycles**, and any number of commands can run on the same cycle.
   Real sequencers have a pipeline depth and a limited number of outputs changed per cycle.
 - **Every applied write is a Scope edge**, including a write of the value already present.

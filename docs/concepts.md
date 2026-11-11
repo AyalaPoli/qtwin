@@ -35,6 +35,13 @@
 4. Hardware delay lines can only add delay, so channels are aligned to the slowest one (SKEW_TRIM = max_skew - skew), never by moving an edge earlier.
 5. Faults are injected on purpose, with exact known values, so a test can check that a measurement recovers what was put in. Hand-computed edges check correctness; golden traces only detect change.
 
+## M5: Buffering absorbs jitter (until it doesn't)
+1. A bus write doesn't land when the host makes it: it lands latency + jitter cycles later. The FIFO decouples the two clocks: the host writes early, the sequencer plays exactly on time.
+2. The cost of jitter is zero as long as every command arrives before its timestamp. That slack is the margin: lead - (latency + max jitter + 4 words). Inside the margin the output trace is bit-identical to an instant bus, whatever the seed.
+3. Below the margin the failure is sudden, not gradual: commands go late, and if the FIFO was already empty the sequencer was starved (UNDERRUN). A host that is slower on average than the sequencer always ends there, however big the lead.
+4. A full FIFO must have a policy. This model drops the new command (tail drop), counts it in FIFO.DROPPED and keeps every command already accepted. Blocking the writer would be the other choice.
+5. Error flags are sticky and stamped with the exact cycle, so a fault that lasted one cycle is still visible when the host looks much later. Every random source has a seed, so a failing run can be replayed exactly.
+
 ## M6: Closed-loop calibration (measure, correct, verify)
 1. Calibration is a closed loop: send a known stimulus (one edge at the same cycle on every lane), measure the response on the Scope, write a correction (SKEW_TRIM), then measure again to prove the residual is 0.
 2. The driver does it only through registers and an external measurement, like a real host with an oscilloscope; it never peeks at the device's hidden fault values.

@@ -125,6 +125,48 @@
 - **Now done before M7** (confirmed 2026-11-11): M7's polling and interrupt drivers need bus cost,
   underrun and FIFO-level data, so M5 must come first. Bus defaults stay ideal (0 latency, 0 jitter),
   so M4 goldens and M6 calibration are unchanged.
+- **What:** `Bus(device, bus_latency_cycles, max_jitter_cycles, seed)` with `Bus.writes` log;
+  `Device.check_write/schedule_write` (bus port with an in-flight queue); UNDERRUN; tail drop +
+  `FIFO.DROPPED`; `Device.fifo_levels/status_events`; `driver/base.py` (`stream`, `margin_cycles`,
+  `read_cycle`); `Scenario.bus/stream`, `run() -> RunResult`; scenarios `bus_jitter`, `underrun`,
+  `overflow`; plots `fifo_level.png`, `bus_jitter.png`.
+- **In-order delivery** [assumed]: `arrival = max(issue + latency + jitter, previous arrival)`. Jitter
+  delays a write but never lets it overtake, like AXI writes with one ID. Without this a jittered
+  CMD_PUSH word could land in the wrong frame slot. The rule lives in the device's bus port
+  (`schedule_write`), because the port owns the queue and reset clears it.
+- **Bus arrivals before the sequencer on the same cycle** [assumed]. A frame landing on its own
+  timestamp is on time, which matches M2's `ts < now` = late rule and keeps the 0-latency bus
+  exactly the old instant bus.
+- **Bad accesses raise at issue**, not on arrival (`check_write`): the host hears about a bad address
+  in its own call. A bad command target still fails on the 4th word's arrival, since only the full
+  frame knows its target.
+- **Reset discards writes in flight** [assumed]: the bus port is device state like any other.
+- **Margin = lead - (latency + max jitter + CMD_WORDS)**, as planned. The exact boundary is -1 (a frame
+  may land on its timestamp cycle); tests cover margins 6, 0 and -1 (identical) and -2, -24 (misses).
+- **Streamer timing:** word k goes out at start + k, one write per cycle; `start_i = max(ts_i - lead,
+  start_{i-1} + host_gap_cycles, now)`. `host_gap_cycles` is how the underrun scenario makes the host
+  slower than the sequencer. `stream` lives in `driver/base.py` so M7's drivers can reuse it.
+  `read_cycle` moved there from calibration.
+- **Underrun definition** [assumed]: while RUN is set, a command committed into an **empty** FIFO after
+  its timestamp. Flagged on the commit cycle, the first cycle the device can know. An empty FIFO after
+  the last command never triggers it; a late command behind others is LATE only (head-of-line
+  blocking); a stopped sequencer can't underrun. The M2 late-command test now also expects UNDERRUN,
+  because its scenario is exactly this case.
+- **Overflow = tail drop.** Rejected: dropping the oldest (it was accepted first, the host already
+  counts on it) and blocking the writer (a register bus has no back-pressure in this model).
+  `FifoFullError` is gone; `CommandFifo.push` returns False and the device applies the policy.
+- **DROPPED is a register** (RO, saturating, reset clears it), not a device attribute: the driver
+  can only see the device through the bus. Rejected: clear-on-read (a debug read would lose counts).
+- **FIFO level and status events are instrumentation**, not registers: plots and exact-cycle tests
+  need history, which the hardware doesn't keep. A reset doesn't add a level entry [assumed].
+- **`run_scenario` stays** as the prefilled, instant-bus reference that the KEY test compares against.
+  `run(scenario)` is the full path. The golden test uses `run().edges`, and the 5 M4 goldens are
+  byte-identical.
+- **Plots:** the FIFO plot's y-axis follows the data; the capacity line appears only when the level
+  gets near it. Markers use the reserved status colours, with a text label and an event count.
+  The jitter histogram marks the margin-0 delay (lead - CMD_WORDS).
+- **Registry-pinned tests updated:** the registry list grew, and "every scenario fits the FIFO" now
+  excludes `overflow` by design. The main plots test expects each scenario's own plot set.
 
 ## M6: Driver calibration
 - **What:** `driver/calibration.py`: `calibrate(bus, scope, wait_until)` -> `CalibrationResult` of per-lane
