@@ -45,3 +45,24 @@
 - **The IRQ line is computed** from IRQ_STATUS & IRQ_ENABLE, so it can never go stale.
 - **The clock raises at 2^64** instead of wrapping [assumed]: no run gets close, so reaching it is a bug.
 - Rejected: a separate `RegisterFile` class. With one device, `Device` holding the dict is simpler.
+
+## M2: Command FIFO and event-driven sequencer
+- **What:** `Command` and the frame helpers in `registers.py`, `device/fifo.py`, `device/sequencer.py`,
+  minimal `scope.py`, and the wiring in `device.py` (`push_command`, `run_until`, computed FIFO.LEVEL).
+- **`Command` lives in `registers.py`.** The frame format is part of the register interface, and the
+  driver may import `registers` but not the rest of `qtwin.device`. Rejected: a new top-level module
+  (would widen the driver's allowed imports).
+- **Target = absolute register address.** One address space, no second channel numbering. Only output
+  registers are accepted. Rejected: a packed channel/field id (needs a translation table to explain).
+- **4-word frame, committed on the last word** [assumed]. A 64-bit timestamp needs two words, plus
+  target and value. Committing at the end means a half-sent frame can never run.
+- **Late = execute now and flag** [assumed]. Rejected: drop. Dropping a late "beam off" would leave
+  the beam on; running it late keeps the outputs consistent and the sticky flag reports the miss.
+- **No sorting.** Like hardware, the FIFO never reorders. A smaller timestamp queued behind a larger
+  one goes late, which shows head-of-line blocking.
+- **FIFO.LEVEL computed** from the FIFO, like the IRQ line, so it can't go stale.
+- **Sequencer runs only while CTRL.RUN is set; the clock always counts** [assumed]. The host can fill
+  the FIFO and then start. Commands that come due while stopped run late after RUN.
+- **Full FIFO raises** for now; drop + OVERFLOW is M5.
+- **The Scope records every applied write**, even one that doesn't change the value, so ties stay
+  visible. CTRL.RESET does not clear it (it is an instrument outside the device).

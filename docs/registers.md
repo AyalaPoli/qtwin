@@ -51,8 +51,8 @@ Every access also raises `BusError` for an unaligned or unmapped address. Writin
 | SNSPDn | 0x00 | COUNT | RO | 0 | detector clicks |
 | SNSPDn | 0x04 | THRESHOLD | RW | 0 | [assumed] reset 0 |
 | SNSPDn | 0x08 | LAST_TS | RO | 0 | low 32 bits of the cycle of the last click [assumed] |
-| FIFO | 0x00 | CMD_PUSH | WO | - | command write port; no effect until M2 |
-| FIFO | 0x04 | LEVEL | RO | 0 | commands queued |
+| FIFO | 0x00 | CMD_PUSH | WO | - | command write port, 4 words per command (see below) |
+| FIFO | 0x04 | LEVEL | RO | 0 | commands queued (computed from the FIFO) |
 | FIFO | 0x08 | CAPACITY | RO | 64 | commands [assumed] |
 | FIFO | 0x0C | LOW_WATERMARK | RW | 16 | commands [assumed] |
 
@@ -105,3 +105,25 @@ otherwise a stale value.
 Example: counter = 2^32 - 1. Read LO -> 0xFFFF_FFFF, shadow = 0. The counter ticks to 2^32.
 Read HI -> 0. The result is 2^32 - 1, which is correct. Without the latch, HI would read 1 and the
 result would be 2^33 - 1, off by 2^32 cycles (about 17 s).
+
+## Timed commands (FIFO.CMD_PUSH)
+
+A command is `(timestamp_cycles, target, value)`: write `value` to register `target` at exactly
+absolute cycle `timestamp_cycles`. The host sends it as **4 writes to CMD_PUSH**, in this order
+[assumed]:
+
+| Word | Content |
+|------|---------|
+| 0 | TS_LO: timestamp bits 31..0 |
+| 1 | TS_HI: timestamp bits 63..32 |
+| 2 | TARGET: absolute byte address of the output register |
+| 3 | VALUE: new 32-bit value. **This write commits the command into the FIFO.** |
+
+- Valid targets are the output registers only: `AOMn.FREQ_WORD`, `AOMn.AMPL`, `AOMn.PHASE`,
+  `AOMn.ENABLE`, `GPIOn.LEVEL`. Any other target raises `BusError` on word 3 and the command is
+  dropped; the next write starts a fresh frame.
+- Words 0-2 alone never reach the FIFO. CTRL.RESET discards a half-written frame and empties the FIFO.
+- Committing into a full FIFO raises `FifoFullError` (M2; M5 turns this into drop + STATUS.OVERFLOW).
+- The FIFO is strictly in order. Commands run only while CTRL.RUN is set. A command whose timestamp
+  has already passed when it reaches the head runs immediately and sets STATUS.LATE and IRQ_STATUS.LATE.
+- `encode_command` / `decode_command` in `registers.py` build and parse the 4 words.

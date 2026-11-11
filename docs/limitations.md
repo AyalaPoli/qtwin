@@ -18,11 +18,17 @@ physics is crude. It exists to show real-time and hardware concepts, not to pred
   The same strictness applies to unaligned/unmapped addresses, reads of the write-only CMD_PUSH,
   and values outside 32 bits.
 - **Instant bus in M1.** `read32`/`write32` take 0 cycles. Bus latency and jitter arrive in M5.
-- **CMD_PUSH does nothing in M1.** Writes are accepted and dropped until the FIFO exists (M2).
-- **Clock advanced by hand in M1.** `Clock.advance()` is called by tests; the sequencer drives it from M2.
 - **No counter wrap.** The 64-bit counter raises instead of wrapping at 2^64 (about 2,339 years at 250 MHz).
 - **Identification and sizes are invented:** ID, VERSION, FIFO CAPACITY (64), LOW_WATERMARK reset (16)
   and SNSPD THRESHOLD reset (0) are marked [assumed] in `docs/registers.md`.
+
+## Commands and sequencer
+- **Full FIFO raises** `FifoFullError` (M2). Real hardware drops or blocks; M5 adds drop + STATUS.OVERFLOW.
+- **Applying a command takes 0 cycles**, and any number of commands can run on the same cycle.
+  Real sequencers have a pipeline depth and a limited number of outputs changed per cycle.
+- **Every applied write is a Scope edge**, including a write of the value already present.
+- **Ideal outputs:** no skew or drift yet (M4). Edges land at exactly the commanded cycle.
+- **Time moves only through `Device.run_until`**, called by tests. There is no free-running simulation loop.
 
 ## Drift
 - Drift is integer parts-per-billion, truncated toward zero, so it appears as whole-cycle slips.
