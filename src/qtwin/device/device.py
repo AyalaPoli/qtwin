@@ -13,14 +13,16 @@ and a delay line after the register.
 Timed commands: the host writes CMD_WORDS words to FIFO.CMD_PUSH; the last word commits the command
 into the FIFO; the sequencer applies it at its timestamp and every output write goes to the Scope.
 
-Two event sources share the clock (M5): bus writes arriving at their arrival cycle, and sequencer
-commands at their timestamp. run_until merges them in cycle order; on the same cycle the bus write
-is applied first, so a frame completing on its own timestamp cycle is still on time [assumed].
+Three event sources share the clock: bus writes arriving at their arrival cycle (M5), detector
+clicks (M7), and sequencer commands at their timestamp. run_until merges them in cycle order. On
+the same cycle the order is bus write, click, sequencer [assumed]: a frame completing on its own
+timestamp cycle is still on time, and a click is counted before any command on its cycle runs.
 """
 
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 
 from qtwin.device.clock import Clock, drift_offset
 from qtwin.device.fifo import CommandFifo
@@ -32,6 +34,7 @@ from qtwin.device.registers import (
     CTRL_RUN,
     FIFO_CAPACITY,
     IRQ_FIFO_LOW,
+    IRQ_SNSPD0,
     OUTPUT_TARGETS,
     REG_MASK,
     REGISTERS,
@@ -47,6 +50,7 @@ from qtwin.device.registers import (
     decode_command,
 )
 from qtwin.device.sequencer import Sequencer
+from qtwin.device.snspd import DETECTORS
 from qtwin.scope import LANES, Scope, component
 
 _CTRL = addr("SYSTEM.CTRL")
@@ -58,6 +62,8 @@ _CYCLE_HI = addr("CLOCK.CYCLE_HI")
 _FIFO_LEVEL = addr("FIFO.LEVEL")
 _FIFO_DROPPED = addr("FIFO.DROPPED")
 _FIFO_WATERMARK = addr("FIFO.LOW_WATERMARK")
+_SNSPD_COUNT = tuple(addr(f"{lane}.COUNT") for lane in DETECTORS)
+_SNSPD_LAST_TS = tuple(addr(f"{lane}.LAST_TS") for lane in DETECTORS)
 # Lanes that have a SKEW_TRIM register (AOM and GPIO; SNSPD has none).
 _SKEW_TRIM = {
     lane: BY_NAME[f"{lane}.SKEW_TRIM"].address for lane in LANES if f"{lane}.SKEW_TRIM" in BY_NAME
@@ -87,15 +93,25 @@ class Device:
     scope: where output edges are recorded; a fresh Scope if not given.
     timing: injected faults per lane name ("AOM1"); lanes not listed are ideal. A fault scenario
         sets this. It is not a register: the driver can't see it, only measure its effect.
+    clicks: absolute click cycles per detector ("SNSPD0"), strictly increasing, >= 0 (e.g. from
+        snspd.seeded_clicks). Hidden like `timing`: the driver sees only COUNT, LAST_TS and IRQ.
     """
 
     def __init__(
-        self, scope: Scope | None = None, timing: Mapping[str, LaneTiming] | None = None
+        self,
+        scope: Scope | None = None,
+        timing: Mapping[str, LaneTiming] | None = None,
+        clicks: Mapping[str, Sequence[int]] | None = None,
     ) -> None:
         unknown = set(timing or {}) - set(LANES)
         if unknown:
             raise ValueError(f"unknown lanes in timing: {sorted(unknown)}")
         self._timing = dict(timing or {})
+        # Every click of every detector as (cycle, detector index) in cycle order, and the index
+        # of the next one to deliver. A reset does not replay delivered clicks [assumed]: they
+        # are photons that already arrived, outside the device.
+        self._clicks = _merge_clicks(clicks or {})
+        self._next_click = 0
         self.clock = Clock()
         self.scope = scope if scope is not None else Scope()
         self._fifo = CommandFifo(FIFO_CAPACITY)
@@ -280,23 +296,29 @@ class Device:
     def run_until(self, cycle: int) -> None:
         """Advance simulated time to absolute `cycle` (in cycles).
 
-        Bus writes in flight land at their arrival cycle, before the sequencer on that cycle.
-        While CTRL.RUN is set, every queued command due by then is applied at its timestamp.
-        While stopped the clock still counts but nothing is applied [assumed], so the host can fill
-        the FIFO before starting. Raises ValueError if `cycle` is before the current time.
+        Bus writes in flight land at their arrival cycle, then clicks, then the sequencer on that
+        cycle. While CTRL.RUN is set, every queued command due by then is applied at its
+        timestamp. While stopped the clock still counts and clicks still count, but no command is
+        applied [assumed], so the host can fill the FIFO before starting.
+        Raises ValueError if `cycle` is before the current time.
         """
         if cycle < self.clock.now:
             raise ValueError(f"cycle {cycle} is in the past (now={self.clock.now})")
-        while self._pending and self._pending[0][0] <= cycle:
-            arrival, address, value = self._pending.popleft()
-            # Sequencer up to the cycle before, then the write at its cycle. Several writes can
+        while (event := self._next_input(cycle)) is not None:
+            # Sequencer up to the cycle before, then the event at its cycle. Several events can
             # land on one cycle; only the first moves time, and all of them still go before the
-            # sequencer's turn on that cycle. The write may be CTRL.RUN, so the running state is
+            # sequencer's turn on that cycle. A write may be CTRL.RUN, so the running state is
             # re-read for each stretch.
-            if arrival > self.clock.now:
-                self._advance(arrival - 1)
+            if event > self.clock.now:
+                self._advance(event - 1)
                 self.clock.advance(1)
-            self.write(address, value)
+            if self._pending and self._pending[0][0] == event:
+                _, address, value = self._pending.popleft()
+                self.write(address, value)
+            else:
+                _, detector = self._clicks[self._next_click]
+                self._next_click += 1
+                self._click(detector)
         self._advance(cycle)
 
     def run_until_irq(self, limit: int) -> int | None:
@@ -319,12 +341,25 @@ class Device:
 
     # --- Internals ---
 
+    def _next_input(self, cycle: int) -> int | None:
+        # Cycle of the next bus arrival or click due by `cycle`, or None. On a tie run_until
+        # takes the bus write first, because it checks _pending first.
+        times = []
+        if self._pending:
+            times.append(self._pending[0][0])
+        if self._next_click < len(self._clicks):
+            times.append(self._clicks[self._next_click][0])
+        due = [t for t in times if t <= cycle]
+        return min(due) if due else None
+
     def _next_event(self, limit: int) -> int:
         # Earliest cycle after now (capped at limit) where the device state can change. After a
-        # run_until every pending arrival and every due head lies strictly in the future.
+        # run_until every pending arrival, click and due head lies strictly in the future.
         candidates = [limit]
         if self._pending:
             candidates.append(self._pending[0][0])
+        if self._next_click < len(self._clicks):
+            candidates.append(self._clicks[self._next_click][0])
         if self._values[_CTRL] & CTRL_RUN and len(self._fifo) > 0:
             candidates.append(self._fifo.peek().timestamp_cycles)
         return max(min(candidates), self.clock.now + 1)
@@ -376,6 +411,19 @@ class Device:
         trim = self._values[_SKEW_TRIM[lane]] if lane in _SKEW_TRIM else 0
         return timing.skew_cycles + trim + drift_offset(self.clock.now, timing.drift_ppb)
 
+    def _click(self, detector: int) -> None:
+        # The detector front end counts the click and stamps it with the device clock. COUNT
+        # wraps like a hardware counter [assumed]: the host uses differences, which stay right
+        # modulo 2^32. LAST_TS keeps only the low 32 bits (wraps every 2^32 cycles = 17.18 s);
+        # the driver rebuilds the full cycle from a nearby 64-bit time (driver.base.unwrap_ts).
+        count = (self._values[_SNSPD_COUNT[detector]] + 1) & REG_MASK
+        self._values[_SNSPD_COUNT[detector]] = count
+        self._values[_SNSPD_LAST_TS[detector]] = self.clock.now & REG_MASK
+        self.set_status(IRQ_SNSPD0 << detector)
+        # On the Scope so edge_delay can measure click -> response. No input skew [assumed].
+        lane = DETECTORS[detector]
+        self.scope.record(f"{lane}.COUNT", self.clock.now, self.clock.now, count)
+
     def _late(self) -> None:
         self.set_status(STATUS_LATE)
 
@@ -387,3 +435,17 @@ class Device:
         if reg is None:
             raise BusError(f"unmapped address {address:#x}")
         return reg
+
+
+def _merge_clicks(clicks: Mapping[str, Sequence[int]]) -> list[tuple[int, int]]:
+    # Check each detector's list, then interleave them by cycle. On the same cycle SNSPD0 goes
+    # first (sorting by (cycle, index)); either order would do, but it must be fixed.
+    unknown = set(clicks) - set(DETECTORS)
+    if unknown:
+        raise ValueError(f"unknown detectors in clicks: {sorted(unknown)}")
+    merged: list[tuple[int, int]] = []
+    for lane, cycles in clicks.items():
+        if any(c < 0 for c in cycles) or any(b <= a for a, b in pairwise(cycles)):
+            raise ValueError(f"{lane} clicks must be >= 0 and strictly increasing")
+        merged += [(c, DETECTORS.index(lane)) for c in cycles]
+    return sorted(merged)
