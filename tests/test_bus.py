@@ -51,10 +51,11 @@ def test_write_lands_exactly_bus_latency_cycles_later() -> None:
     bus = Bus(device, bus_latency_cycles=10)
     device.run_until(100)
     bus.write32(AMPL, 7)
+    # Device-side reads: a bus read would itself take 10 cycles (M7) and sample at 119.
     device.run_until(109)
-    assert bus.read32(AMPL) == 0
+    assert device.read(AMPL) == 0
     device.run_until(110)
-    assert bus.read32(AMPL) == 7
+    assert device.read(AMPL) == 7
     assert bus.writes == (BusWrite(100, 110, 0, AMPL, 7),)
 
 
@@ -157,3 +158,49 @@ def test_cmd_push_frames_stay_aligned_under_jitter() -> None:
     device.run_until(2_000)
     got = [(e.ideal_cycle, e.value) for e in device.scope.edges]
     assert got == [(c.timestamp_cycles, c.value) for c in cmds]
+
+
+# --- Read cost (M7) ---
+
+
+def test_read_takes_bus_latency_cycles_and_samples_on_arrival() -> None:
+    device = Device()
+    bus = Bus(device, bus_latency_cycles=10)
+    device.run_until(100)
+    lo = bus.read32(r.addr("CLOCK.CYCLE_LO"))
+    assert lo == 110  # sampled when the read reached the device
+    assert device.clock.now == 110  # the host waited for it
+
+
+def test_read_sees_a_write_that_lands_during_the_read() -> None:
+    device = Device()
+    bus = Bus(device, bus_latency_cycles=10)
+    device.run_until(100)
+    bus.write32(AMPL, 7)  # lands at 110
+    device.run_until(105)
+    assert bus.read32(AMPL) == 7  # sampled at 115
+
+
+def test_reads_are_counted() -> None:
+    bus = Bus(Device(), bus_latency_cycles=3)
+    assert bus.read_count == 0
+    for _ in range(5):
+        bus.read32(STATUS)
+    assert bus.read_count == 5
+
+
+def test_reads_draw_no_jitter() -> None:
+    # Interleaving reads must not change the write jitter sequence of a seed.
+    bus = Bus(Device(), bus_latency_cycles=2, max_jitter_cycles=30, seed=4)
+    for i in range(50):
+        bus.read32(STATUS)
+        bus.write32(AMPL, i)
+    assert [w.jitter_cycles for w in bus.writes] == jitters(4)
+
+
+def test_instant_bus_read_takes_no_time() -> None:
+    device = Device()
+    bus = Bus(device)
+    device.run_until(50)
+    bus.read32(STATUS)
+    assert device.clock.now == 50

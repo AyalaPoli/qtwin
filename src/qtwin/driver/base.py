@@ -66,7 +66,8 @@ def stream(
         if starts:
             start = max(start, starts[-1] + host_gap_cycles)
         # The host can't act in the past: an early command it is already late for goes out now.
-        start = max(start, read_cycle(bus))
+        # read_cycle samples at its CYCLE_LO read; the CYCLE_HI read costs one more bus latency.
+        start = max(start, read_cycle(bus) + bus.bus_latency_cycles)
         for k, word in enumerate(encode_command(cmd)):
             wait_until(start + k)
             bus.write32(_CMD_PUSH, word)

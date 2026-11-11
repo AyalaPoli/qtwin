@@ -219,10 +219,11 @@ def test_underrun_over_a_slow_bus_is_flagged_on_the_arrival_cycle(device: Device
     bus = Bus(device, bus_latency_cycles=50)
     device.write(CTRL, r.CTRL_RUN)
     push_over_bus(bus, Command(30, GPIO0, 1))  # all 4 words land at cycle 50
+    # Device-side reads: a bus read would itself take 50 cycles (M7) and sample at 99.
     device.run_until(49)
-    assert bus.read32(STATUS) & r.STATUS_UNDERRUN == 0
+    assert device.read(STATUS) & r.STATUS_UNDERRUN == 0
     device.run_until(50)
-    assert bus.read32(STATUS) & ERRORS == r.STATUS_UNDERRUN | r.STATUS_LATE
+    assert device.read(STATUS) & ERRORS == r.STATUS_UNDERRUN | r.STATUS_LATE
 
 
 # --- Instrumentation (M5): FIFO level and status events over time, for plots and tests ---

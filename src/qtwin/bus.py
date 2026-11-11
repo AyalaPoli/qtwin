@@ -6,8 +6,13 @@ by a seeded generator, so the same seed gives the same jitter sequence. Writes a
 issue order: jitter can hold a write back behind an earlier one but never let it overtake
 (see Device.schedule_write). That keeps the 4 CMD_PUSH words of a frame in order.
 
-Reads are instant and don't wait for writes still in flight [assumed]; read cost is M7.
-With the defaults (0, 0) every write lands on its issue cycle: the instant bus of M1-M6.
+M7 timing model for reads: a read blocks the host for bus_latency_cycles. Device time runs on
+while the request travels, and the register is sampled when it arrives, at issue + latency; the
+response path is free [assumed]. Reads draw no jitter [assumed], so adding reads never changes a
+seed's write-jitter sequence. Writes still in flight that land during the read are seen by it.
+
+With the defaults (0, 0) every write lands on its issue cycle and reads take no time: the instant
+bus of M1-M6.
 The driver uses this class and never touches qtwin.device directly.
 """
 
@@ -37,7 +42,7 @@ class BusWrite:
 class Bus:
     """Memory-mapped register bus between the host driver and one Device.
 
-    bus_latency_cycles: fixed delay of every write, in cycles (>= 0).
+    bus_latency_cycles: fixed delay of every write, and the cost of every read, in cycles (>= 0).
     max_jitter_cycles: extra random delay per write, uniform 0..max_jitter_cycles cycles (>= 0).
     seed: seeds the jitter generator; same seed, same jitter sequence.
     """
@@ -60,14 +65,30 @@ class Bus:
         # from it, so the sequence depends only on the seed and the number of writes.
         self._rng = random.Random(seed)
         self._writes: list[BusWrite] = []
+        self._read_count = 0
 
     @property
     def writes(self) -> tuple[BusWrite, ...]:
         """Every write so far, in issue order (for the jitter histogram and tests)."""
         return tuple(self._writes)
 
+    @property
+    def read_count(self) -> int:
+        """Reads so far: the host CPU cost M7 compares between polling and interrupts."""
+        return self._read_count
+
     def read32(self, address: int) -> int:
-        """Read the 32-bit register at byte `address`. Raises BusError on a rejected access."""
+        """Read the 32-bit register at byte `address`. Raises BusError on a rejected access.
+
+        Takes bus_latency_cycles of device time: the value is sampled when the read arrives.
+        """
+        self._read_count += 1
+        # The host is blocked on the bus, so device time passes; whatever happens on the way
+        # (a write landing, a command firing, a click) is visible in the sampled value. With
+        # latency 0 time is not touched at all, so the instant bus reads exactly as in M1-M6
+        # (run_until(now) would apply commands due this cycle before the read).
+        if self.bus_latency_cycles > 0:
+            self._device.run_until(self._device.clock.now + self.bus_latency_cycles)
         return self._device.read(address)
 
     def write32(self, address: int, value: int) -> None:
