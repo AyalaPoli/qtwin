@@ -2,9 +2,11 @@
 
 Each function takes edges and an output path and returns the path. They use Figure objects with
 an explicit Agg canvas instead of pyplot, so there is no global figure state and no GUI backend.
-Run `python -m qtwin.analysis.plots` to write the ideal scenario's plots to out/.
+Run `python -m qtwin.analysis.plots --scenario NAME` (default ideal) to write one scenario's plots
+to out/NAME/.
 """
 
+import argparse
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -14,7 +16,7 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
 from qtwin.analysis.stats import linear_fit
-from qtwin.scenarios import ideal_commands, run_scenario
+from qtwin.scenarios import SCENARIOS, run_scenario
 from qtwin.scope import LANES, Edge, channel_offsets, component, offset_vs_time
 
 # Colors from a validated colorblind-safe categorical palette (slots 1 and 2), plus neutrals.
@@ -169,16 +171,33 @@ def offset_vs_time_plot(edges: tuple[Edge, ...], path: Path) -> Path:
     return _save(fig, path)
 
 
-def main(out_dir: Path = Path("out")) -> list[Path]:
-    """Run the ideal scenario and write its three plots to `out_dir` (created if missing)."""
-    edges = run_scenario(ideal_commands())
+def main(scenario: str = "ideal", out_dir: Path = Path("out")) -> list[Path]:
+    """Run `scenario` and write its three plots to out_dir/<scenario>/ (created if missing).
+
+    Raises KeyError for an unknown scenario name.
+    """
+    s = SCENARIOS[scenario]
+    edges = run_scenario(s.commands, s.timing)
+    folder = out_dir / scenario
     return [
-        timing_diagram(edges, out_dir / "timing.png"),
-        offset_bars({"measured": edges}, out_dir / "offset_bars.png"),
-        offset_vs_time_plot(edges, out_dir / "offset_vs_time.png"),
+        timing_diagram(edges, folder / "timing.png"),
+        offset_bars({"measured": edges}, folder / "offset_bars.png"),
+        offset_vs_time_plot(edges, folder / "offset_vs_time.png"),
     ]
 
 
+def cli(argv: Sequence[str] | None = None) -> list[Path]:
+    """Command-line entry: parse `argv` (sys.argv if None) and call main.
+
+    An unknown scenario name exits with a usage message (SystemExit), listing the valid ones.
+    """
+    parser = argparse.ArgumentParser(description="Write a scenario's plots as PNG files.")
+    parser.add_argument("--scenario", choices=list(SCENARIOS), default="ideal")
+    parser.add_argument("--out", type=Path, default=Path("out"), help="parent output folder")
+    args = parser.parse_args(argv)
+    return main(args.scenario, args.out)
+
+
 if __name__ == "__main__":
-    for written in main():
+    for written in cli():
         print(written)

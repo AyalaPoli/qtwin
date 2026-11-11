@@ -5,13 +5,14 @@ from pathlib import Path
 import pytest
 
 from qtwin.analysis.plots import (
+    cli,
     main,
     offset_axis_limits,
     offset_bars,
     offset_vs_time_plot,
     timing_diagram,
 )
-from qtwin.scenarios import ideal_commands, run_scenario
+from qtwin.scenarios import SCENARIOS, ideal_commands, run_scenario
 from qtwin.scope import Edge
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -62,12 +63,28 @@ def test_plot_creates_missing_parent_directory(tmp_path: Path) -> None:
     assert_png(out)
 
 
-def test_main_writes_the_three_ideal_plots(tmp_path: Path) -> None:
-    paths = main(tmp_path)
+@pytest.mark.parametrize("name", SCENARIOS)
+def test_main_writes_three_plots_per_scenario(tmp_path: Path, name: str) -> None:
+    paths = main(name, tmp_path)
     assert sorted(p.name for p in paths) == ["offset_bars.png", "offset_vs_time.png", "timing.png"]
     for path in paths:
-        assert path.parent == tmp_path
+        assert path.parent == tmp_path / name
         assert_png(path)
+
+
+def test_cli_defaults_to_ideal(tmp_path: Path) -> None:
+    paths = cli(["--out", str(tmp_path)])
+    assert {p.parent for p in paths} == {tmp_path / "ideal"}
+
+
+def test_cli_picks_the_named_scenario(tmp_path: Path) -> None:
+    paths = cli(["--scenario", "one_both", "--out", str(tmp_path)])
+    assert {p.parent for p in paths} == {tmp_path / "one_both"}
+
+
+def test_cli_rejects_an_unknown_scenario(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        cli(["--scenario", "nope", "--out", str(tmp_path)])
 
 
 def test_offset_axis_spans_at_least_one_cycle_each_way() -> None:
