@@ -2,7 +2,7 @@
 
 ## Purpose
 It must implement real-time and hardware concepts and be a working code
-sample I can explain line by line. Full design and milestones: `qtwin_plan.md` (read it before planning).
+sample I can explain line by line. Full design and milestones: `docs/qtwin_plan.md` (read it before planning).
 It is a deliberately simplified MODEL: not RTL, not cycle-exact silicon, crude physics.
 Never claim otherwise in code, docs or README. Known simplifications go in `docs/limitations.md`.
 
