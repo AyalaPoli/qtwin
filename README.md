@@ -1,4 +1,5 @@
 # qtwin
+![tests](https://github.com/USERNAME/qtwin/actions/workflows/tests.yml/badge.svg)
 
 **A deterministic, register-level Python model of an FPGA timing-control box, plus the host driver
 that programs it, calibrates it and reacts to detector clicks in real time.**
