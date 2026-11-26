@@ -123,8 +123,6 @@ Built milestone by milestone (M0-M7) with Claude Code, under rules written in
   what was chosen, what was rejected, why. Each also adds a short plain-language entry to
   [`docs/concepts.md`](docs/concepts.md).
 - **Small commits**, one logical change each, imperative messages.
-- **Explainable code.** The goal was code I can explain line by line: simple over clever, comments
-  say why, and every numeric parameter's docstring states its unit.
 
 ## Assumptions and limitations
 
